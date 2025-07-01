@@ -1,0 +1,86 @@
+# ==============================================================================
+# R-MAE Pre-training Configuration (ISARC Dataset)
+# tools/cfgs/custom_models/rmae_pretrain_isarc.yaml
+# ==============================================================================
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    # Pre-training에서는 데이터 증강 최소화 (원본 geometric structure 보존)
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['placeholder']
+        AUG_CONFIG_LIST:
+            # Pre-training에서는 단순한 증강만 사용
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+
+            - NAME: random_world_rotation
+              WORLD_ROT_ANGLE: [-0.39269908, 0.39269908]  # ±22.5도 (기존 45도에서 축소)
+
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.98, 1.02]  # 기존 [0.95, 1.05]에서 축소
+
+MODEL:
+    NAME: RMAEVoxelNeXt
+    
+    # Pre-training mode
+    IS_PRETRAINING: True
+    
+    # R-MAE specific parameters (based on GitHub implementation)
+    MASKED_RATIO: 0.5        # 80% masking ratio
+    ANGULAR_RANGE: 10        # 5-degree angular groups
+    RANGE_AWARE: False       # Enable range-aware masking
+    
+    VFE:
+        NAME: MeanVFE  # 기존과 동일
+
+    # R-MAE backbone for pre-training
+    RMAE_BACKBONE:
+        NAME: RMAEBackbone
+        CHANNELS: [16, 32, 64, 128]  # VoxelResBackBone8xVoxelNeXt와 호환
+    
+    # MAE decoder for occupancy reconstruction
+    MAE_DECODER:
+        NAME: MAEDecoder
+        CHANNELS: [128, 64, 32, 16]
+    
+    # No detection head during pre-training
+    DENSE_HEAD: null
+    POST_PROCESSING: null
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 4    # 기존과 동일
+    
+    # Conservative approach: 50 epochs for custom dataset
+    NUM_EPOCHS: 80
+    
+    OPTIMIZER: adam_onecycle  # 기존과 동일
+    LR: 0.001                # Pre-training용 LR (기존 0.01보다 낮춤)
+    WEIGHT_DECAY: 0.01       # 기존과 동일
+    MOMENTUM: 0.9            # 기존과 동일
+    
+    MOMS: [0.95, 0.85]       # 기존과 동일
+    PCT_START: 0.4           # 기존과 동일
+    DIV_FACTOR: 10           # 기존과 동일
+    DECAY_STEP_LIST: [35, 45] # 50 epochs에 맞춤 조정
+    LR_DECAY: 0.1            # 기존과 동일
+    LR_CLIP: 0.0000001       # 기존과 동일
+    
+    LR_WARMUP: False         # 기존과 동일
+    WARMUP_EPOCH: 1          # 기존과 동일
+    
+    GRAD_NORM_CLIP: 10       # 기존과 동일
+
+# Loss weights
+LOSS_CONFIG:
+    LOSS_WEIGHTS: {
+        'mae_loss': 1.0
+    }
+
+# # Early stopping configuration (optional)
+# EARLY_STOPPING:
+#     ENABLED: True
+#     PATIENCE: 8              # Stop if no improvement for 8 epochs
+#     MIN_DELTA: 0.005         # Minimum improvement threshold (0.5%)
+#     MONITOR: 'mae_loss'      # Monitor MAE reconstruction loss
