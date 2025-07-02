@@ -1,11 +1,15 @@
+import _init_path  # 추가
 import argparse
 import datetime
 import glob
 import os
+import numpy as np  # 추가
+import tqdm  # 추가
 from pathlib import Path
 
 import torch
 import torch.nn as nn
+from torch.nn.utils import clip_grad_norm_  # 추가
 from tensorboardX import SummaryWriter
 
 from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
@@ -13,7 +17,7 @@ from pcdet.datasets import build_dataloader
 from pcdet.models import build_network
 from pcdet.utils import common_utils
 from train_utils.optimization import build_optimizer, build_scheduler
-from train_utils.train_utils import train_model
+# from train_utils.train_utils import train_model  # 주석 처리 (사용 안함)
 
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
@@ -92,7 +96,6 @@ def main():
     tb_log = SummaryWriter(log_dir=str(output_dir / 'tensorboard')) if cfg.LOCAL_RANK == 0 else None
 
     # -----------------------create dataloader & network & optimizer---------------------------
-    # MAE는 라벨이 필요 없으므로 training=True로 설정하지만 실제로는 self-supervised
     train_set, train_loader, train_sampler = build_dataloader(
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
@@ -118,7 +121,7 @@ def main():
         it, start_epoch = model.load_params_with_optimizer(args.ckpt, to_cpu=dist_train, optimizer=optimizer, logger=logger)
         last_epoch = start_epoch + 1
 
-    model.train()  # before wrap to DistributedDataParallel to support fixed some parameters
+    model.train()
     if dist_train:
         model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.LOCAL_RANK % torch.cuda.device_count()])
     logger.info(model)
@@ -181,7 +184,61 @@ def load_data_to_gpu(batch_dict):
         else:
             batch_dict[key] = torch.from_numpy(val).float().cuda()
 
-# 간단한 MAE 훈련 루프 (기존 train_model을 기반으로 수정)
+def train_one_epoch_mae(model, optimizer, train_loader, model_func, lr_scheduler, accumulated_iter, optim_cfg,
+                        rank, tbar, tb_log=None, leave_pbar=False, total_it_each_epoch=None, dataloader_iter=None):
+    if total_it_each_epoch == len(train_loader):
+        dataloader_iter = iter(train_loader)
+
+    if rank == 0:
+        pbar = tqdm.tqdm(total=total_it_each_epoch, leave=leave_pbar, desc='train', dynamic_ncols=True)
+
+    for cur_it in range(total_it_each_epoch):
+        try:
+            batch = next(dataloader_iter)
+        except StopIteration:
+            dataloader_iter = iter(train_loader)
+            batch = next(dataloader_iter)
+            print('new iters')
+
+        lr_scheduler.step(accumulated_iter)
+
+        try:
+            cur_lr = float(optimizer.lr)
+        except:
+            cur_lr = optimizer.param_groups[0]['lr']
+
+        if tb_log is not None:
+            tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
+
+        model.train()
+        optimizer.zero_grad()
+
+        loss, tb_dict, disp_dict = model_func(model, batch)
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
+        optimizer.step()
+
+        accumulated_iter += 1
+        disp_dict.update({'loss': loss.item(), 'lr': cur_lr})
+
+        # log to console and tensorboard
+        if rank == 0:
+            pbar.update()
+            pbar.set_postfix(dict(total_it=accumulated_iter))
+            tbar.set_postfix(disp_dict)
+            tbar.refresh()
+
+            if tb_log is not None:
+                tb_log.add_scalar('train/loss', loss, accumulated_iter)
+                tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
+                for key, val in tb_dict.items():
+                    tb_log.add_scalar('train/' + key, val, accumulated_iter)
+    if rank == 0:
+        pbar.close()
+    return accumulated_iter
+
+# train_model_mae 함수 추가
 def train_model_mae(model, optimizer, train_loader, model_func, lr_scheduler, optim_cfg,
                    start_epoch, total_epochs, start_iter, rank, tb_log, ckpt_save_dir,
                    train_sampler=None, lr_warmup_scheduler=None, ckpt_save_interval=1,
@@ -216,7 +273,6 @@ def train_model_mae(model, optimizer, train_loader, model_func, lr_scheduler, op
             # save trained model
             trained_epoch = cur_epoch + 1
             if trained_epoch % ckpt_save_interval == 0 and rank == 0:
-
                 ckpt_list = glob.glob(str(ckpt_save_dir / 'checkpoint_epoch_*.pth'))
                 ckpt_list.sort(key=os.path.getmtime)
 
@@ -229,59 +285,33 @@ def train_model_mae(model, optimizer, train_loader, model_func, lr_scheduler, op
                     checkpoint_state(model, optimizer, trained_epoch, accumulated_iter), filename=ckpt_name,
                 )
 
-def train_one_epoch_mae(model, optimizer, dataloader, model_func, lr_scheduler, accumulated_iter, optim_cfg,
-                       rank, tbar, total_it_each_epoch, dataloader_iter, tb_log=None, leave_pbar=False):
-    if rank == 0:
-        pbar = tqdm.tqdm(total=total_it_each_epoch, leave=leave_pbar, desc='train', dynamic_ncols=True)
+def checkpoint_state(model=None, optimizer=None, epoch=None, it=None):
+    optim_state = optimizer.state_dict() if optimizer is not None else None
+    if model is not None:
+        if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+            model_state = model.module.state_dict()
+        else:
+            model_state = model.state_dict()
+    else:
+        model_state = None
 
-    for cur_it in range(total_it_each_epoch):
-        try:
-            batch = next(dataloader_iter)
-        except StopIteration:
-            dataloader_iter = iter(dataloader)
-            batch = next(dataloader_iter)
+    try:
+        import pcdet
+        version = 'pcdet+' + pcdet.__version__
+    except:
+        version = 'none'
 
-        lr_scheduler.step(accumulated_iter)
+    return {'epoch': epoch, 'it': it, 'model_state': model_state, 'optimizer_state': optim_state, 'version': version}
 
-        try:
-            cur_lr = float(optimizer.lr)
-        except:
-            cur_lr = optimizer.param_groups[0]['lr']
+def save_checkpoint(state, filename='checkpoint'):
+    if False and 'optimizer_state' in state:
+        optimizer_state = state['optimizer_state']
+        state.pop('optimizer_state', None)
+        optimizer_filename = '{}_optim.pth'.format(filename)
+        torch.save({'optimizer_state': optimizer_state}, optimizer_filename)
 
-        if tb_log is not None:
-            tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
-
-        model.train()
-        optimizer.zero_grad()
-
-        loss, tb_dict, disp_dict = model_func(model, batch)
-
-        loss.backward()
-        clip_grad_norm_(model.parameters(), optim_cfg.GRAD_NORM_CLIP)
-        optimizer.step()
-
-        accumulated_iter += 1
-        disp_dict.update({'loss': loss.item(), 'lr': cur_lr})
-
-        # log to console and tensorboard
-        if rank == 0:
-            pbar.update()
-            pbar.set_postfix(dict(total_it=accumulated_iter))
-            tbar.set_postfix(disp_dict)
-
-            if tb_log is not None:
-                tb_log.add_scalar('train/loss', loss, accumulated_iter)
-                tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
-                for key, val in tb_dict.items():
-                    tb_log.add_scalar('train/' + key, val, accumulated_iter)
-    if rank == 0:
-        pbar.close()
-    return accumulated_iter
+    filename = '{}.pth'.format(filename)
+    torch.save(state, filename)
 
 if __name__ == '__main__':
-    import numpy as np
-    import tqdm
-    from torch.nn.utils import clip_grad_norm_
-    from train_utils.train_utils import checkpoint_state, save_checkpoint
-    
     main()

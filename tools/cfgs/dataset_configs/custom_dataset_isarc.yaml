@@ -1,6 +1,6 @@
 DATASET: 'CustomDataset'
-# DATA_PATH: '/home/sungwoo/VoxelNeXt/data/isarc_test'
-DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0528_real_synthetic'
+DATA_PATH: '/home/sungwoo/VoxelNeXt/data/isarc_test'
+# DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0528_real_synthetic'
 POINT_CLOUD_RANGE: [-70.4, -70.4, -6, 70.4, 70.4, 10]
 CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller' ]  
 MAP_CLASS_TO_KITTI: {

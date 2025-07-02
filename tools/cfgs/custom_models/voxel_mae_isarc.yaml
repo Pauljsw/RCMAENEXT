@@ -1,20 +1,23 @@
-CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller' ]  
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
 
 DATA_CONFIG:
     _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
 
     DATA_AUGMENTOR:
-        DISABLE_AUG_LIST: ['gt_sampling']  # GT sampling 비활성화
+        DISABLE_AUG_LIST: ['gt_sampling']
         AUG_CONFIG_LIST:
             - NAME: random_world_rotation
-              WORLD_ROT_ANGLE: [-0.39269908, 0.39269908]  # ±22.5도
+              WORLD_ROT_ANGLE: [-0.39269908, 0.39269908]
             - NAME: random_world_scaling
               WORLD_SCALE_RANGE: [0.95, 1.05]
-              
-
 
 MODEL:
     NAME: VoxelMAE
+    
+    MASK_RATIO: 0.35
+    ANGULAR_RANGE: 20
+    RANGE_AWARE: False
+    ADAPTIVE_MASKING: True
 
     VFE:
         NAME: MeanVFE
@@ -25,9 +28,6 @@ MODEL:
         CHANNELS: [16, 32, 64, 128, 128]
         OUT_CHANNEL: 128
 
-    # MAE 전용 설정
-    MASK_RATIO: 0.5  # 75% 마스킹
-    
     DECODER:
         CHANNELS: [128, 64, 32, 16]
         
@@ -36,18 +36,18 @@ MODEL:
         RECONSTRUCTION_WEIGHT: 0.5
 
 OPTIMIZATION:
-    BATCH_SIZE_PER_GPU: 4  # MAE는 메모리를 많이 사용
-    NUM_EPOCHS: 200  # 사전훈련은 더 많은 에포크
+    BATCH_SIZE_PER_GPU: 4
+    NUM_EPOCHS: 100
     
     OPTIMIZER: adam_onecycle
-    LR: 0.003  # 사전훈련은 낮은 학습률
+    LR: 0.005
     WEIGHT_DECAY: 0.01
     MOMENTUM: 0.9
 
     MOMS: [0.95, 0.85]
     PCT_START: 0.4
     DIV_FACTOR: 10
-    DECAY_STEP_LIST: [70, 90]
+    DECAY_STEP_LIST: [35, 45]
     LR_DECAY: 0.1
     LR_CLIP: 0.0000001
 
@@ -55,7 +55,6 @@ OPTIMIZATION:
     WARMUP_EPOCH: 1
 
     GRAD_NORM_CLIP: 10
-    
-# MAE 사전훈련에서는 평가 비활성화
+
 EVAL_CONFIG:
     EVAL_METRIC: none
