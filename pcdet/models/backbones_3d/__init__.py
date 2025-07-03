@@ -7,6 +7,7 @@ from .spconv_backbone_voxelnext2d import VoxelResBackBone8xVoxelNeXt2D
 from .spconv_backbone_voxelnext_sps import VoxelResBackBone8xVoxelNeXtSPS
 from .spconv_backbone_voxelnext2d_sps import VoxelResBackBone8xVoxelNeXt2DSPS
 from .spconv_unet import UNetV2
+from .radial_mae_voxelnext import RadialMAEVoxelNeXt
 
 __all__ = {
     'VoxelBackBone8x': VoxelBackBone8x,
@@ -20,5 +21,6 @@ __all__ = {
     'VoxelResBackBone8xVoxelNeXtSPS': VoxelResBackBone8xVoxelNeXtSPS,
     'VoxelResBackBone8xVoxelNeXt2DSPS': VoxelResBackBone8xVoxelNeXt2DSPS,
     'PillarBackBone8x': PillarBackBone8x,
-    'PillarRes18BackBone8x': PillarRes18BackBone8x
+    'PillarRes18BackBone8x': PillarRes18BackBone8x,
+    'RadialMAEVoxelNeXt': RadialMAEVoxelNeXt
 }

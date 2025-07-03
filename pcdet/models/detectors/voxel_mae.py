@@ -24,7 +24,14 @@ class VoxelMAE(Detector3DTemplate):
             self.module_list = self.build_networks()
         
         self.decoder = self._build_decoder()
-        self.occupancy_loss = nn.BCEWithLogitsLoss()
+        loss_cfg = model_cfg.get('LOSS_CONFIG', {})
+        pos_weight = loss_cfg.get('POS_WEIGHT', 1.0)
+        
+        self.occupancy_loss = nn.BCEWithLogitsLoss(
+            pos_weight=torch.tensor(pos_weight).cuda()
+        )
+        
+        print(f"✅ VoxelMAE Loss: pos_weight={pos_weight}")
         self.chamfer_loss = nn.MSELoss()
     
     def _build_decoder(self):

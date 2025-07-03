@@ -1,26 +1,19 @@
-#!/usr/bin/env python3
-"""
-train_ssl.py - R-MAE Self-Supervised Learning Training Script
-Based on official R-MAE GitHub implementation
-"""
-
+import os
+#os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'  # You can adjust the value based on your needs
 import _init_path
 import argparse
 import datetime
 import glob
-import os
-import re
-import time
 from pathlib import Path
+from test import repeat_eval_ckpt
 
-import numpy as np
 import torch
 import torch.nn as nn
 from tensorboardX import SummaryWriter
 
 from pcdet.config import cfg, cfg_from_list, cfg_from_yaml_file, log_config_to_file
 from pcdet.datasets import build_dataloader
-from pcdet.models import build_network
+from pcdet.models import build_network, model_fn_decorator
 from pcdet.utils import common_utils
 from train_utils.optimization import build_optimizer, build_scheduler
 from train_utils.train_utils import train_model
@@ -29,6 +22,7 @@ from train_utils.train_utils import train_model
 def parse_config():
     parser = argparse.ArgumentParser(description='arg parser')
     parser.add_argument('--cfg_file', type=str, default=None, help='specify the config for training')
+
     parser.add_argument('--batch_size', type=int, default=None, required=False, help='batch size for training')
     parser.add_argument('--epochs', type=int, default=None, required=False, help='number of epochs to train for')
     parser.add_argument('--workers', type=int, default=4, help='number of workers for dataloader')
@@ -50,12 +44,21 @@ def parse_config():
     parser.add_argument('--start_epoch', type=int, default=0, help='')
     parser.add_argument('--num_epochs_to_eval', type=int, default=0, help='number of checkpoints to be evaluated')
     parser.add_argument('--save_to_file', action='store_true', default=False, help='')
+    
+    parser.add_argument('--use_tqdm_to_record', action='store_true', default=False, help='if True, the intermediate losses will not be logged to file, only tqdm will be used')
+    parser.add_argument('--logger_iter_interval', type=int, default=50, help='')
+    parser.add_argument('--ckpt_save_time_interval', type=int, default=300, help='in terms of seconds')
+    parser.add_argument('--wo_gpu_stat', action='store_true', help='')
+    parser.add_argument('--use_amp', action='store_true', help='use mix precision training')
+    
 
     args = parser.parse_args()
 
     cfg_from_yaml_file(args.cfg_file, cfg)
     cfg.TAG = Path(args.cfg_file).stem
     cfg.EXP_GROUP_PATH = '/'.join(args.cfg_file.split('/')[1:-1])  # remove 'cfgs' and 'xxxx.yaml'
+    
+    args.use_amp = args.use_amp or cfg.OPTIMIZATION.get('USE_AMP', False)
 
     if args.set_cfgs is not None:
         cfg_from_list(args.set_cfgs, cfg)
@@ -83,14 +86,14 @@ def main():
     args.epochs = cfg.OPTIMIZATION.NUM_EPOCHS if args.epochs is None else args.epochs
 
     if args.fix_random_seed:
-        common_utils.set_random_seed(666)
+        common_utils.set_random_seed(666 + cfg.LOCAL_RANK)
 
     output_dir = cfg.ROOT_DIR / 'output' / cfg.EXP_GROUP_PATH / cfg.TAG / args.extra_tag
     ckpt_dir = output_dir / 'ckpt'
     output_dir.mkdir(parents=True, exist_ok=True)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    log_file = output_dir / ('log_train_%s.txt' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
+    log_file = output_dir / ('train_%s.log' % datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
     logger = common_utils.create_logger(log_file, rank=cfg.LOCAL_RANK)
 
     # log to file
@@ -99,7 +102,10 @@ def main():
     logger.info('CUDA_VISIBLE_DEVICES=%s' % gpu_list)
 
     if dist_train:
-        logger.info('total_batch_size: %d' % (total_gpus * args.batch_size))
+        logger.info('Training in distributed mode : total_batch_size: %d' % (total_gpus * args.batch_size))
+    else:
+        logger.info('Training with a single process')
+        
     for key, val in vars(args).items():
         logger.info('{:16} {}'.format(key, val))
     log_config_to_file(cfg, logger=logger)
@@ -108,7 +114,7 @@ def main():
 
     tb_log = SummaryWriter(log_dir=str(output_dir / 'tensorboard')) if cfg.LOCAL_RANK == 0 else None
 
-    # -----------------------create dataloader & network & optimizer---------------------------
+    logger.info("----------- Create dataloader & network & optimizer -----------")
     train_set, train_loader, train_sampler = build_dataloader(
         dataset_cfg=cfg.DATA_CONFIG,
         class_names=cfg.CLASS_NAMES,
@@ -117,10 +123,9 @@ def main():
         logger=logger,
         training=True,
         merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch,
-        total_epochs=args.epochs
+        total_epochs=args.epochs,
+        seed=42 if args.fix_random_seed else None
     )
-
-    val_loader = None
 
     model = build_network(model_cfg=cfg.MODEL, num_class=len(cfg.CLASS_NAMES), dataset=train_set)
     if args.sync_bn:
@@ -129,26 +134,34 @@ def main():
 
     optimizer = build_optimizer(model, cfg.OPTIMIZATION)
 
+    # load checkpoint if it is possible
     start_epoch = it = 0
     last_epoch = -1
     if args.pretrained_model is not None:
-        model.load_params_from_file(filename=args.pretrained_model, to_cpu=False, logger=logger)
+        model.load_params_from_file(filename=args.pretrained_model, to_cpu=dist_train, logger=logger)
 
     if args.ckpt is not None:
-        it, start_epoch = model.load_params_with_optimizer(args.ckpt, to_cpu=False, optimizer=optimizer, logger=logger)
+        it, start_epoch = model.load_params_with_optimizer(args.ckpt, to_cpu=dist_train, optimizer=optimizer, logger=logger)
         last_epoch = start_epoch + 1
     else:
         ckpt_list = glob.glob(str(ckpt_dir / '*checkpoint_epoch_*.pth'))
+              
         if len(ckpt_list) > 0:
             ckpt_list.sort(key=os.path.getmtime)
-            it, start_epoch = model.load_params_with_optimizer(
-                ckpt_list[-1], to_cpu=False, optimizer=optimizer, logger=logger
-            )
-            last_epoch = start_epoch + 1
+            while len(ckpt_list) > 0:
+                try:
+                    it, start_epoch = model.load_params_with_optimizer(
+                        ckpt_list[-1], to_cpu=dist_train, optimizer=optimizer, logger=logger
+                    )
+                    last_epoch = start_epoch + 1
+                    break
+                except:
+                    ckpt_list = ckpt_list[:-1]
 
     model.train()  # before wrap to DistributedDataParallel to support fixed some parameters
     if dist_train:
         model = nn.parallel.DistributedDataParallel(model, device_ids=[cfg.LOCAL_RANK % torch.cuda.device_count()])
+    logger.info(f'----------- Model {cfg.MODEL.NAME} created, param count: {sum([m.numel() for m in model.parameters()])} -----------')
     logger.info(model)
 
     lr_scheduler, lr_warmup_scheduler = build_scheduler(
@@ -157,9 +170,9 @@ def main():
     )
 
     # -----------------------start training---------------------------
-    logger.info('**********************Start R-MAE Pre-training %s/%s(%s)**********************'
+    logger.info('**********************Start training %s/%s(%s)**********************'
                 % (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
-    
+
     train_model(
         model,
         optimizer,
@@ -173,41 +186,26 @@ def main():
         rank=cfg.LOCAL_RANK,
         tb_log=tb_log,
         ckpt_save_dir=ckpt_dir,
-        val_loader=val_loader,
         train_sampler=train_sampler,
         lr_warmup_scheduler=lr_warmup_scheduler,
         ckpt_save_interval=args.ckpt_save_interval,
         max_ckpt_save_num=args.max_ckpt_save_num,
-        merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch,
-        logger=logger
+        merge_all_iters_to_one_epoch=args.merge_all_iters_to_one_epoch, 
+        logger=logger, 
+        logger_iter_interval=args.logger_iter_interval,
+        ckpt_save_time_interval=args.ckpt_save_time_interval,
+        use_logger_to_record=not args.use_tqdm_to_record, 
+        show_gpu_stat=not args.wo_gpu_stat,
+        use_amp=args.use_amp,
+        cfg=cfg
     )
 
-    logger.info('**********************End R-MAE Pre-training %s/%s(%s)**********************\n\n\n'
+    if hasattr(train_set, 'use_shared_memory') and train_set.use_shared_memory:
+        train_set.clean_shared_memory()
+
+    logger.info('**********************End training %s/%s(%s)**********************\n\n\n'
                 % (cfg.EXP_GROUP_PATH, cfg.TAG, args.extra_tag))
-
-
-def model_fn_decorator():
-    def model_func(model, batch_dict):
-        load_data_to_gpu(batch_dict)
-        ret_dict, tb_dict, disp_dict = model(batch_dict)
-
-        loss = ret_dict['loss'].mean()
-        if hasattr(ret_dict, 'tb_dict'):
-            tb_dict.update(ret_dict['tb_dict'])
-
-        return loss, tb_dict, disp_dict
-
-    return model_func
-
-
-def load_data_to_gpu(batch_dict):
-    for key, val in batch_dict.items():
-        if not isinstance(val, np.ndarray):
-            continue
-        if key in ['frame_id', 'metadata', 'calib']:
-            continue
-        batch_dict[key] = torch.from_numpy(val).float().cuda()
-
+    
 
 if __name__ == '__main__':
     main()
