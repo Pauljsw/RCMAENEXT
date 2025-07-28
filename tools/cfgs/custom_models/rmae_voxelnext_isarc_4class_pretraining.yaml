@@ -30,7 +30,7 @@ MODEL:
         EVAL_METRIC: kitti
 
 OPTIMIZATION:
-    BATCH_SIZE_PER_GPU: 8
+    BATCH_SIZE_PER_GPU: 16
     NUM_EPOCHS: 30
 
     OPTIMIZER: adam_onecycle

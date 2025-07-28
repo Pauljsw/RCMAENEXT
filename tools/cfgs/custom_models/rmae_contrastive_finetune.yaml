@@ -3,6 +3,7 @@ CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
 DATA_CONFIG:
     _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
     
+    # Fine-tuning에서는 기존 데이터 증강 그대로 사용
     DATA_AUGMENTOR:
         DISABLE_AUG_LIST: ['placeholder']
         AUG_CONFIG_LIST:
@@ -22,27 +23,33 @@ DATA_CONFIG:
               DATABASE_WITH_FAKELIDAR: False
               REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
               LIMIT_WHOLE_SCENE: False
+
             - NAME: random_world_flip
               ALONG_AXIS_LIST: ['x']
+
             - NAME: random_world_rotation
               WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+
             - NAME: random_world_scaling
               WORLD_SCALE_RANGE: [0.95, 1.05]
 
 MODEL:
-    NAME: VoxelNeXt
+    NAME: RMAEContrastiveVoxelNeXt
     
     VFE:
         NAME: MeanVFE
 
     BACKBONE_3D:
-        NAME: VoxelResBackBone8xVoxelNeXt
+        NAME: RMAEContrastiveVoxelNeXt
+        # Fine-tuning mode
+        PRETRAINING: False
+        USE_CONTRASTIVE: False  # Fine-tuning에서는 contrastive 비활성화
 
     DENSE_HEAD:
         NAME: VoxelNeXtHead
         CLASS_AGNOSTIC: False
         INPUT_FEATURES: 128
-        
+
         CLASS_NAMES_EACH_HEAD: [
             ['dumptruck', 'excavator', 'grader', 'roller'],
         ]
@@ -89,22 +96,22 @@ MODEL:
         EVAL_METRIC: kitti
 
 OPTIMIZATION:
-    BATCH_SIZE_PER_GPU: 16
-    NUM_EPOCHS: 30              # ✅ 50 → 30 (pretrained model)
+    BATCH_SIZE_PER_GPU: 4
+    NUM_EPOCHS: 50
 
     OPTIMIZER: adam_onecycle
-    LR: 0.001                   # ✅ 0.01 → 0.001 (pretrained model용 낮은 LR)
+    LR: 0.01  # Fine-tuning용 높은 학습률
     WEIGHT_DECAY: 0.01
     MOMENTUM: 0.9
 
     MOMS: [0.95, 0.85]
     PCT_START: 0.4
     DIV_FACTOR: 10
-    DECAY_STEP_LIST: [20, 25]   # ✅ 30 epoch에 맞게 조정
+    DECAY_STEP_LIST: [35, 45]
     LR_DECAY: 0.1
     LR_CLIP: 0.0000001
 
-    LR_WARMUP: True             # ✅ False → True (pretrained model 안정화)
-    WARMUP_EPOCH: 3          # ✅ 1 → 3 (충분한 warmup)
+    LR_WARMUP: False
+    WARMUP_EPOCH: 1
 
     GRAD_NORM_CLIP: 10

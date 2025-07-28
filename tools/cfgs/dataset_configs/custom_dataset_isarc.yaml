@@ -1,7 +1,13 @@
 DATASET: 'CustomDataset'
+# DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0723_mixed_train_3channel'
+# DATA_PATH: '/home/sungwoo/VoxelNeXt/data/isarc_test_3channel'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/isarc_test'
+# DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0528_real_synthetic_3channel'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0528_real_synthetic'
-DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0704_LLM2'
+# DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0704_LLM2'
+DATA_PATH: '/home/sungwoo/VoxelNeXt/data/isarc_train_3channel'
+# DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0721_dense_DEGR_Mid_Mixed'
+# DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0722_Noiseup_densemedium'
 POINT_CLOUD_RANGE: [-70.4, -70.4, -6, 70.4, 70.4, 10]
 CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller' ]  
 MAP_CLASS_TO_KITTI: {
@@ -31,7 +37,6 @@ DATA_AUGMENTOR:
           DB_INFO_PATH:
               - custom_dbinfos_train.pkl
           
-          # 이 부분을 추가해주세요
           BACKUP_DB_INFO:
               DB_INFO_PATH: custom_dbinfos_train.pkl
               DB_DATA_PATH: gt_database/custom_database.npy

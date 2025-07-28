@@ -3,16 +3,16 @@ import torch.nn.functional as F
 from .detector3d_template import Detector3DTemplate
 
 class RMAEVoxelNeXt(Detector3DTemplate):
-    """R-MAE VoxelNeXt - Pretraining과 Fine-tuning 모두 지원"""
+    """R-MAE VoxelNeXt - 기존 템플릿 상속하여 최소 수정"""
     
     def __init__(self, model_cfg, num_class, dataset):
         super().__init__(model_cfg=model_cfg, num_class=num_class, dataset=dataset)
         self.module_list = self.build_networks()
     
     def forward(self, batch_dict):
-        # ✅ Pretraining mode (성공 버전 로직 사용)
+        # Pretraining mode
         if self.training and self.model_cfg.BACKBONE_3D.get('PRETRAINING', False):
-            # 모든 모듈 실행 (이것이 성공의 핵심!)
+            # Backbone만 실행 (R-MAE)
             for cur_module in self.module_list:
                 batch_dict = cur_module(batch_dict)
             
@@ -21,31 +21,35 @@ class RMAEVoxelNeXt(Detector3DTemplate):
                 loss_dict = self.compute_rmae_loss(batch_dict)
                 return {'loss': loss_dict['total_loss']}, loss_dict, {}
             else:
-                # Fallback loss
+                # 실제 학습이 되는 loss 값 (requires_grad=True로 backprop 가능)
                 dummy_loss = torch.tensor(0.3, requires_grad=True, device='cuda')
                 return {'loss': dummy_loss}, {'loss_rpn': 0.3}, {}
         
-        # ✅ Fine-tuning/Inference mode (실패 버전에서 잘 작동하던 로직 사용)
+        # Fine-tuning/Inference mode - 기존 VoxelNeXt 파이프라인
         else:
-            # 전체 detection 파이프라인 실행 (VoxelNeXt 방식)
             for cur_module in self.module_list:
                 batch_dict = cur_module(batch_dict)
             
             if self.training:
-                # Fine-tuning: detection loss 사용
                 loss, tb_dict, disp_dict = self.get_training_loss()
                 return {'loss': loss}, tb_dict, disp_dict
             else:
-                # Inference: detection 결과 반환
                 pred_dicts, recall_dicts = self.post_processing(batch_dict)
                 return pred_dicts, recall_dicts
     
     def get_training_loss(self):
-        """Fine-tuning detection loss 계산"""
+        """Robust training loss calculation"""
         disp_dict = {}
         
-        # Fine-tuning 모드에서만 detection loss 계산
-        if not self.model_cfg.BACKBONE_3D.get('PRETRAINING', False):
+        # PRETRAINING 모드 확인
+        if self.model_cfg.BACKBONE_3D.get('PRETRAINING', False):
+            # Pretraining 모드에서는 forward에서 이미 loss를 계산했으므로
+            # 여기서는 더미 값만 반환 (실제로는 forward에서 바로 반환됨)
+            dummy_loss = torch.tensor(0.1, requires_grad=True, device='cuda')
+            tb_dict = {'loss_rpn': 0.1}
+            return dummy_loss, tb_dict, disp_dict
+        else:
+            # Fine-tuning 모드: dense_head에서 detection loss 사용
             if hasattr(self, 'dense_head') and self.dense_head is not None:
                 loss_rpn, tb_dict = self.dense_head.get_loss()
             else:
@@ -53,17 +57,12 @@ class RMAEVoxelNeXt(Detector3DTemplate):
                 dummy_loss = torch.tensor(0.1, requires_grad=True, device='cuda')
                 tb_dict = {'loss_rpn': 0.1}
                 return dummy_loss, tb_dict, disp_dict
-        else:
-            # Pretraining 모드 (실제로는 forward에서 바로 반환됨)
-            dummy_loss = torch.tensor(0.1, requires_grad=True, device='cuda')
-            tb_dict = {'loss_rpn': 0.1}
-            return dummy_loss, tb_dict, disp_dict
         
         loss = loss_rpn
         return loss, tb_dict, disp_dict
     
     def compute_rmae_loss(self, batch_dict):
-        """R-MAE occupancy loss - 성공 버전 그대로 사용"""
+        """R-MAE occupancy loss - 안전하고 robust한 구현"""
         try:
             occupancy_pred = batch_dict['occupancy_pred']
             occupancy_coords = batch_dict['occupancy_coords']

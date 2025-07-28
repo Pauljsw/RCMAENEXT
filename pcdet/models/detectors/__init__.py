@@ -15,6 +15,7 @@ from .pillarnet import PillarNet
 from .voxelnext import VoxelNeXt
 from .voxel_mae import VoxelMAE
 from .rmae_voxelnext import RMAEVoxelNeXt
+from .rmae_contrastive_voxelnext import RMAEContrastiveVoxelNeXt
 
 __all__ = {
     'Detector3DTemplate': Detector3DTemplate,
@@ -34,6 +35,7 @@ __all__ = {
     'VoxelNeXt': VoxelNeXt,
     'VoxelMAE': VoxelMAE,
     'RMAEVoxelNeXt' : RMAEVoxelNeXt,
+    'RMAEContrastiveVoxelNeXt': RMAEContrastiveVoxelNeXt
 }
 
 

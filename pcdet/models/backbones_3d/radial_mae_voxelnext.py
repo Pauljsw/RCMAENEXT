@@ -82,6 +82,7 @@ class RadialMAEVoxelNeXt(VoxelResBackBone8xVoxelNeXt):
     def forward(self, batch_dict):
         """기존 VoxelNeXt forward + R-MAE masking"""
         voxel_features = batch_dict['voxel_features']
+        
         voxel_coords = batch_dict['voxel_coords']
         batch_size = batch_dict['batch_size']
         
