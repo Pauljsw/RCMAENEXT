@@ -1,0 +1,73 @@
+# CMAE-3D VoxelNeXt Pretraining Configuration
+# Based on CMAE-3D: Contrastive Masked AutoEncoders for Self-Supervised 3D Object Detection
+
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    # Pretraining에서는 최소한의 데이터 증강만 적용
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['gt_sampling']  # Ground truth sampling 비활성화
+        AUG_CONFIG_LIST:
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+            
+            - NAME: random_world_rotation
+              WORLD_ROT_ANGLE: [-0.39269908, 0.39269908]  # ±22.5도
+            
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.95, 1.05]  # 약간의 스케일링
+
+MODEL:
+    NAME: CMAEVoxelNeXtComplete
+    
+    # CMAE-3D 손실 가중치
+    OCCUPANCY_WEIGHT: 1.0     # 점유도 재구성 손실
+    MLFR_WEIGHT: 0.5          # Multi-scale Latent Feature Reconstruction 손실
+    CONTRASTIVE_WEIGHT: 0.3   # Hierarchical Relational Contrastive Learning 손실
+    
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: CMAEVoxelNeXtComplete
+        
+        # Pretraining 모드 활성화
+        PRETRAINING: True
+        
+        # Geometric-Semantic Hybrid Masking (GSHM) parameters
+        MASKED_RATIO: 0.75              # 기본 마스킹 비율
+        ANGULAR_RANGE: 15               # Radial masking 각도 범위 (degrees)
+        DISTANCE_RANGES: [0, 30, 60, 100]  # Distance-based masking ranges (meters)
+        MASK_RATIOS: [0.9, 0.8, 0.7, 0.6]  # 거리별 마스킹 비율 (멀수록 적게)
+        
+        # Hierarchical Relational Contrastive Learning (HRCL) parameters
+        TEMPERATURE: 0.1                # Contrastive learning temperature
+        MOMENTUM: 0.999                 # Teacher network momentum update rate
+        QUEUE_SIZE: 8192               # Memory queue size for negative samples
+
+    # Pretraining에서는 Detection Head 사용하지 않음
+    DENSE_HEAD: null
+    POST_PROCESSING: null
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 2      # GPU당 배치 크기 (메모리에 따라 조정)
+    NUM_EPOCHS: 50             # Pretraining 에포크 수
+    
+    OPTIMIZER: adam_onecycle
+    LR: 0.0005                 # Pretraining용 낮은 학습률
+    WEIGHT_DECAY: 0.01
+    MOMENTUM: 0.9
+    
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [35, 45]
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+    
+    LR_WARMUP: True
+    WARMUP_EPOCH: 3           # Warmup 에포크
+    
+    GRAD_NORM_CLIP: 10        # Gradient clipping
