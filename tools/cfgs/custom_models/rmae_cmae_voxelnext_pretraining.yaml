@@ -39,7 +39,7 @@ MODEL:
         
         # ➕ CMAE-3D 새 파라미터 (논문 기반)
         MOMENTUM: 0.999          # Teacher EMA momentum
-        TEMPERATURE: 0.1         # Contrastive learning temperature
+        TEMPERATURE: 0.2         # Contrastive learning temperature
 
     # ✅ 기존 성공 로직: DENSE_HEAD 섹션 완전 제거 (pretraining에서는 불필요)
 

@@ -99,7 +99,6 @@ class RMAECMAEVoxelNeXt(Detector3DTemplate):
             rmae_loss = self._compute_rmae_occupancy_loss(batch_dict)
             losses['rmae_occupancy'] = rmae_loss.item()
             total_loss = total_loss + self.occupancy_weight * rmae_loss
-            print(f"✅ R-MAE Loss: {rmae_loss.item():.4f}")
         except Exception as e:
             print(f"⚠️ R-MAE Loss 실패: {e}")
             rmae_loss = torch.tensor(0.5, device='cuda', requires_grad=True)
@@ -112,7 +111,6 @@ class RMAECMAEVoxelNeXt(Detector3DTemplate):
                 contrastive_loss = self._compute_cmae_contrastive_loss(batch_dict)
                 losses['cmae_contrastive'] = contrastive_loss.item()
                 total_loss = total_loss + self.contrastive_weight * contrastive_loss
-                print(f"✅ CMAE Contrastive Loss: {contrastive_loss.item():.4f}")
             except Exception as e:
                 print(f"⚠️ CMAE Contrastive Loss 실패: {e}")
                 contrastive_loss = torch.tensor(0.3, device='cuda', requires_grad=True)
@@ -125,7 +123,6 @@ class RMAECMAEVoxelNeXt(Detector3DTemplate):
                 feature_loss = self._compute_cmae_feature_loss(batch_dict)
                 losses['cmae_feature'] = feature_loss.item()
                 total_loss = total_loss + self.feature_weight * feature_loss
-                print(f"✅ CMAE Feature Loss: {feature_loss.item():.4f}")
             except Exception as e:
                 print(f"⚠️ CMAE Feature Loss 실패: {e}")
                 feature_loss = torch.tensor(0.2, device='cuda', requires_grad=True)
@@ -214,11 +211,9 @@ class RMAECMAEVoxelNeXt(Detector3DTemplate):
         
         # Teacher features 확인
         has_teacher = 'teacher_features' in batch_dict
-        print(f"🔍 Teacher features 존재: {has_teacher}")
         
         if has_teacher:
             teacher_feat = batch_dict['teacher_features']
-            print(f"🔍 Teacher features shape: {teacher_feat.shape}")
             
             if torch.isnan(teacher_feat).any():
                 print("❌ Teacher features에 NaN 감지")
@@ -227,7 +222,6 @@ class RMAECMAEVoxelNeXt(Detector3DTemplate):
         try:
             if has_teacher:
                 # ✅ Teacher-Student Contrastive Learning (개선)
-                print("✅ Teacher-Student Contrastive Learning 시작")
                 
                 # L2 normalize
                 student_norm = F.normalize(student_feat, dim=-1, eps=1e-8)
@@ -315,33 +309,87 @@ class RMAECMAEVoxelNeXt(Detector3DTemplate):
     
     def _compute_cmae_feature_loss(self, batch_dict):
         """
-        ➕ CMAE-3D Multi-scale Feature Reconstruction Loss (새로 추가)
-        간단한 L1 reconstruction loss
+        ✅ CMAE-3D 논문 기반 올바른 MLFR 구현
+        Multi-scale Latent Feature Reconstruction
         """
-        multi_scale_features = batch_dict['multi_scale_features']
+        if 'teacher_features' not in batch_dict:
+            print("❌ Teacher features 없음 - Feature loss 계산 불가")
+            return torch.tensor(0.1, device='cuda', requires_grad=True)
         
-        total_loss = torch.tensor(0.0, device='cuda', requires_grad=True)
-        count = 0
+        # ✅ 논문: Teacher features가 reconstruction target
+        teacher_features = batch_dict['teacher_features']  # [batch_size, 256]
+        student_features = batch_dict.get('student_features')  # [batch_size, 256]
         
-        # 각 스케일별 feature reconstruction
-        for scale_name, features in multi_scale_features.items():
-            if hasattr(features, 'features'):
-                feat_tensor = features.features
-            else:
-                feat_tensor = features
+        if student_features is None:
+            print("❌ Student features 없음")
+            return torch.tensor(0.1, device='cuda', requires_grad=True)
+        
+        # ✅ CMAE-3D 논문: L1 loss between teacher and student features
+        loss = F.l1_loss(student_features, teacher_features.detach())
+        
+        # ✅ Multi-scale 추가 (논문에서는 3개 스케일)
+        multi_scale_loss = loss
+        
+        # Additional multi-scale features if available
+        if 'multi_scale_features' in batch_dict:
+            teacher_multi = batch_dict.get('teacher_multi_scale_features', {})
+            student_multi = batch_dict.get('multi_scale_features', {})
             
-            if feat_tensor.size(0) > 0:
-                # Simple reconstruction target: slightly perturbed features
-                target = feat_tensor.detach() + torch.randn_like(feat_tensor) * 0.1
-                loss = F.l1_loss(feat_tensor, target)
-                total_loss = total_loss + loss
-                count += 1
+            scale_losses = []
+            for scale_name in ['x_conv2', 'x_conv3', 'x_conv4']:
+                if scale_name in teacher_multi and scale_name in student_multi:
+                    t_feat = teacher_multi[scale_name]
+                    s_feat = student_multi[scale_name]
+                    
+                    # Extract global features for each scale
+                    if hasattr(t_feat, 'features') and hasattr(s_feat, 'features'):
+                        t_global = self._extract_scale_features(t_feat)
+                        s_global = self._extract_scale_features(s_feat)
+                        
+                        scale_loss = F.l1_loss(s_global, t_global.detach())
+                        scale_losses.append(scale_loss)
+            
+            if scale_losses:
+                multi_scale_loss = loss + 0.5 * sum(scale_losses) / len(scale_losses)
         
-        if count > 0:
-            return total_loss / count
-        else:
-            return torch.tensor(0.2, device='cuda', requires_grad=True)
+        return multi_scale_loss
     
+    def _extract_scale_features(self, sparse_tensor):
+        """각 스케일별 global features 추출"""
+        if hasattr(sparse_tensor, 'features') and hasattr(sparse_tensor, 'indices'):
+            features = sparse_tensor.features
+            indices = sparse_tensor.indices
+            
+            # Batch별 global pooling
+            batch_indices = indices[:, 0]
+            batch_size = int(batch_indices.max().item()) + 1
+            
+            batch_features = []
+            for batch_idx in range(batch_size):
+                batch_mask = batch_indices == batch_idx
+                batch_feat = features[batch_mask]
+                
+                if batch_feat.size(0) > 0:
+                    global_feat = torch.mean(batch_feat, dim=0, keepdim=True)
+                else:
+                    global_feat = torch.zeros(1, features.size(-1), device=features.device)
+                
+                batch_features.append(global_feat)
+            
+            result = torch.cat(batch_features, dim=0)
+            
+            # Dimension adjustment to 256
+            if result.size(-1) != 256:
+                if result.size(-1) >= 256:
+                    result = result[:, :256]
+                else:
+                    padding = 256 - result.size(-1)
+                    result = F.pad(result, (0, padding))
+            
+            return result
+        
+        return torch.randn(1, 256, device=sparse_tensor.device)
+
     def get_training_loss(self):
         """
         ✅ 기존 성공한 Fine-tuning loss 로직 그대로

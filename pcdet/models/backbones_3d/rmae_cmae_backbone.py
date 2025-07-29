@@ -189,6 +189,16 @@ class RMAECMAEBackbone(VoxelResBackBone8xVoxelNeXt):
         voxel_coords = batch_dict['voxel_coords']
         batch_size = batch_dict['batch_size']
         
+        # ✅ 디버깅 코드 추가 - 원본 배치 정보
+        original_batch_size = int(voxel_coords[:, 0].max().item()) + 1
+        print(f"🔍 [DEBUG] Original batch size: {original_batch_size}")
+        
+        # 배치별 voxel 개수 확인
+        for batch_idx in range(original_batch_size):
+            batch_mask = voxel_coords[:, 0] == batch_idx
+            voxel_count = batch_mask.sum().item()
+            print(f"🔍 [DEBUG] Batch {batch_idx}: {voxel_count} voxels")
+        
         # ✅ R-MAE masking 적용 (training 시에만)
         if self.training and hasattr(self.model_cfg, 'PRETRAINING') and self.model_cfg.PRETRAINING:
             batch_dict['original_voxel_coords'] = voxel_coords.clone()
@@ -199,6 +209,19 @@ class RMAECMAEBackbone(VoxelResBackBone8xVoxelNeXt):
             batch_dict['voxel_coords'] = voxel_coords
             batch_dict['voxel_features'] = voxel_features
             
+            # ✅ 디버깅 코드 추가 - 마스킹 후 배치 정보
+            if len(voxel_coords) > 0:
+                masked_batch_size = int(voxel_coords[:, 0].max().item()) + 1
+                print(f"🔍 [DEBUG] After masking batch size: {masked_batch_size}")
+                
+                # 마스킹 후 배치별 voxel 개수 확인
+                for batch_idx in range(masked_batch_size):
+                    batch_mask = voxel_coords[:, 0] == batch_idx
+                    voxel_count = batch_mask.sum().item()
+                    print(f"🔍 [DEBUG] Masked Batch {batch_idx}: {voxel_count} voxels")
+            else:
+                print(f"🔍 [DEBUG] No voxels after masking!")
+            
             # ✅ CMAE-3D: Teacher forward (full/unmasked input)
             if hasattr(self, 'has_teacher') and self.has_teacher:
                 teacher_features = self._forward_teacher_correct(
@@ -207,6 +230,7 @@ class RMAECMAEBackbone(VoxelResBackBone8xVoxelNeXt):
                     batch_size
                 )
                 batch_dict['teacher_features'] = teacher_features
+                print(f"🔍 [DEBUG] Teacher features shape: {teacher_features.shape}")
         
         # ✅ Student network forward (masked input)
         input_sp_tensor = spconv.SparseConvTensor(
@@ -233,6 +257,7 @@ class RMAECMAEBackbone(VoxelResBackBone8xVoxelNeXt):
             # ✅ CMAE-3D: Student features
             student_features = self._extract_global_features_correct(x_conv4)
             batch_dict['student_features'] = student_features
+            print(f"🔍 [DEBUG] Student features shape: {student_features.shape}")
                 
             # ✅ CMAE-3D: Teacher EMA 업데이트
             if hasattr(self, 'has_teacher') and self.has_teacher:
@@ -258,50 +283,87 @@ class RMAECMAEBackbone(VoxelResBackBone8xVoxelNeXt):
     
     def radial_masking(self, voxel_coords, voxel_features):
         """
-        ✅ 기존 성공한 R-MAE radial masking 로직 그대로 사용
+        ✅ 이전 성공 R-MAE 로직 완전 복원 (최소 voxel 보장)
         """
         if not self.training:
             return voxel_coords, voxel_features
             
         batch_size = int(voxel_coords[:, 0].max()) + 1
+        print(f"🔍 [MASKING] Processing {batch_size} batches for radial masking")
+        
         masked_coords, masked_features = [], []
         
         for batch_idx in range(batch_size):
             mask = voxel_coords[:, 0] == batch_idx
+            
             if not mask.any():
+                print(f"🔍 [MASKING] Batch {batch_idx}: EMPTY - keeping empty tensors")
+                # ✅ 빈 배치도 빈 텐서로 추가하여 배치 순서 유지
+                empty_coords = torch.empty(0, 4, dtype=voxel_coords.dtype, device=voxel_coords.device)
+                empty_features = torch.empty(0, voxel_features.size(-1), dtype=voxel_features.dtype, device=voxel_features.device)
+                masked_coords.append(empty_coords)
+                masked_features.append(empty_features)
                 continue
                 
             coords_b = voxel_coords[mask]
             features_b = voxel_features[mask]
             
-            # R-MAE 각도 기반 마스킹
-            xyz = coords_b[:, 1:4].float()
+            print(f"🔍 [MASKING] Batch {batch_idx}: {len(coords_b)} voxels before masking")
             
-            # Cylindrical coordinates
-            x, y = xyz[:, 0], xyz[:, 1]
+            # ✅ 이전 성공 로직: 실제 좌표 계산
+            voxel_size = getattr(self, 'voxel_size', [0.1, 0.1, 0.1])
+            point_cloud_range = getattr(self, 'point_cloud_range', [-70, -40, -3, 70, 40, 1])
+            
+            x = coords_b[:, 1].float() * voxel_size[0] + point_cloud_range[0]
+            y = coords_b[:, 2].float() * voxel_size[1] + point_cloud_range[1]
             theta = torch.atan2(y, x)
             
-            # Angular groups
-            num_groups = int(360 / self.angular_range)
-            group_size = 2 * np.pi / num_groups
-            theta_norm = (theta + np.pi) % (2 * np.pi)
-            groups = (theta_norm / group_size).long()
-            
-            # Random group selection for masking
-            groups_to_mask = torch.randperm(num_groups)[:int(num_groups * self.masked_ratio)]
-            
-            # Keep voxels NOT in masked groups
+            # ✅ Angular masking (이전 성공 로직)
+            num_sectors = int(360 / self.angular_range)
+            sector_size = 2 * np.pi / num_sectors
             keep_mask = torch.ones(len(coords_b), dtype=torch.bool, device=coords_b.device)
-            for group_idx in groups_to_mask:
-                group_mask = groups == group_idx
-                keep_mask = keep_mask & (~group_mask)
+            
+            for i in range(num_sectors):
+                start = -np.pi + i * sector_size
+                end = -np.pi + (i + 1) * sector_size
+                in_sector = (theta >= start) & (theta < end)
+                
+                if in_sector.sum() > 0 and torch.rand(1) < self.masked_ratio:
+                    keep_mask[in_sector] = False
+            
+            kept_voxels_before = keep_mask.sum().item()
+            print(f"🔍 [MASKING] Batch {batch_idx}: {kept_voxels_before}/{len(coords_b)} voxels after initial masking")
+            
+            # ✅ 핵심: 최소 voxel 보장 (이전 성공 로직 완전 복원)
+            min_keep = max(10, int(len(coords_b) * 0.1))  # 최소 10개 또는 10%
+            if keep_mask.sum() < min_keep:
+                # 마스킹된 것들 중 일부 복원
+                indices = torch.where(~keep_mask)[0]
+                restore_count = min_keep - keep_mask.sum().item()
+                
+                if restore_count > 0 and len(indices) > 0:
+                    restore_count = min(restore_count, len(indices))
+                    restore_idx = indices[torch.randperm(len(indices))[:restore_count]]
+                    keep_mask[restore_idx] = True
+                    print(f"🔧 [MASKING] Batch {batch_idx}: Restored {restore_count} voxels to maintain minimum")
+            
+            kept_voxels_final = keep_mask.sum().item()
+            print(f"🔍 [MASKING] Batch {batch_idx}: {kept_voxels_final}/{len(coords_b)} voxels kept ({kept_voxels_final/len(coords_b)*100:.1f}%)")
             
             masked_coords.append(coords_b[keep_mask])
             masked_features.append(features_b[keep_mask])
         
+        # ✅ 모든 배치에 대해 결과가 있어야 함
+        assert len(masked_coords) == batch_size, f"Missing batches: {len(masked_coords)} != {batch_size}"
+        
         if masked_coords:
-            return torch.cat(masked_coords, dim=0), torch.cat(masked_features, dim=0)
+            result_coords = torch.cat(masked_coords, dim=0)
+            result_features = torch.cat(masked_features, dim=0)
+            
+            print(f"🔍 [MASKING] Final result: {len(result_coords)} total voxels")
+            return result_coords, result_features
         else:
+            print(f"⚠️ [MASKING] No voxels remained after masking! Returning original")
             return voxel_coords, voxel_features
     
     def _forward_teacher_correct(self, original_coords, original_features, batch_size):
@@ -344,38 +406,60 @@ class RMAECMAEBackbone(VoxelResBackBone8xVoxelNeXt):
     
     def _extract_global_features_correct(self, sparse_tensor):
         """
-        ➕ CMAE Global feature extraction (논문 준수)
+        ✅ 올바른 CMAE Global feature extraction (배치별 처리)
         """
         try:
-            if hasattr(sparse_tensor, 'features'):
-                features = sparse_tensor.features
+            if hasattr(sparse_tensor, 'features') and hasattr(sparse_tensor, 'indices'):
+                features = sparse_tensor.features  # [N, C]
+                indices = sparse_tensor.indices    # [N, 4] (batch, z, y, x)
             else:
-                features = sparse_tensor
+                # Fallback
+                return torch.randn(1, 256, device=sparse_tensor.device)
             
             if features.size(0) == 0:
                 return torch.randn(1, 256, device=features.device)
             
-            # Global average pooling
-            global_feat = torch.mean(features, dim=0, keepdim=True)
+            # ✅ 배치별로 global feature 추출
+            batch_indices = indices[:, 0]  # batch indices
+            batch_size = int(batch_indices.max().item()) + 1
             
-            # Project to target dimension (논문에서는 특정 차원으로 projection)
-            if hasattr(self, 'student_projector'):
-                projected = self.student_projector(global_feat)
-            else:
-                # Fallback: 차원 맞추기
-                if global_feat.size(-1) != 256:
-                    if global_feat.size(-1) >= 256:
-                        projected = global_feat[:, :256]
-                    else:
-                        padding = 256 - global_feat.size(-1)
-                        projected = F.pad(global_feat, (0, padding))
+            batch_features = []
+            for batch_idx in range(batch_size):
+                # 현재 배치의 features만 추출
+                batch_mask = batch_indices == batch_idx
+                batch_feat = features[batch_mask]  # [N_batch, C]
+                
+                if batch_feat.size(0) > 0:
+                    # Global average pooling for this batch
+                    global_feat = torch.mean(batch_feat, dim=0, keepdim=True)  # [1, C]
                 else:
-                    projected = global_feat
+                    # Empty batch handling
+                    global_feat = torch.zeros(1, features.size(-1), device=features.device)
+                
+                batch_features.append(global_feat)
             
-            return projected
+            # Stack all batch features
+            result = torch.cat(batch_features, dim=0)  # [batch_size, C]
+            
+            # Project to target dimension
+            if hasattr(self, 'student_projector'):
+                projected = self.student_projector(result)
+            else:
+                # Dimension adjustment
+                if result.size(-1) != 256:
+                    if result.size(-1) >= 256:
+                        projected = result[:, :256]
+                    else:
+                        padding = 256 - result.size(-1)
+                        projected = F.pad(result, (0, padding))
+                else:
+                    projected = result
+            
+            return projected  # [batch_size, 256] ← 이제 올바른 shape!
             
         except Exception as e:
             print(f"⚠️ Global feature extraction 실패: {e}")
+            # Fallback to batch_size=1
             device = sparse_tensor.features.device if hasattr(sparse_tensor, 'features') else sparse_tensor.device
             return torch.randn(1, 256, device=device)
     
