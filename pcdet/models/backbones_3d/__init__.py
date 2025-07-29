@@ -9,6 +9,7 @@ from .spconv_backbone_voxelnext2d_sps import VoxelResBackBone8xVoxelNeXt2DSPS
 from .spconv_unet import UNetV2
 from .radial_mae_voxelnext import RadialMAEVoxelNeXt
 from .cmae_voxelnext import CMAEVoxelNeXtComplete
+from .rmae_cmae_backbone import RMAECMAEBackbone
 
 
 __all__ = {
@@ -25,5 +26,6 @@ __all__ = {
     'PillarBackBone8x': PillarBackBone8x,
     'PillarRes18BackBone8x': PillarRes18BackBone8x,
     'RadialMAEVoxelNeXt': RadialMAEVoxelNeXt,
-    'CMAEVoxelNeXtComplete': CMAEVoxelNeXtComplete
+    'CMAEVoxelNeXtComplete': CMAEVoxelNeXtComplete,
+    'RMAECMAEBackbone': RMAECMAEBackbone
 }

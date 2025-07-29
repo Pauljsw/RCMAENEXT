@@ -16,6 +16,7 @@ from .voxelnext import VoxelNeXt
 from .voxel_mae import VoxelMAE
 from .rmae_voxelnext import RMAEVoxelNeXt
 from .cmae_voxelnext import CMAEVoxelNeXtComplete
+from .rmae_cmae_voxelnext import RMAECMAEVoxelNeXt
 
 __all__ = {
     'Detector3DTemplate': Detector3DTemplate,
@@ -35,7 +36,8 @@ __all__ = {
     'VoxelNeXt': VoxelNeXt,
     'VoxelMAE': VoxelMAE,
     'RMAEVoxelNeXt' : RMAEVoxelNeXt,
-    'CMAEVoxelNeXtComplete': CMAEVoxelNeXtComplete
+    'CMAEVoxelNeXtComplete': CMAEVoxelNeXtComplete,
+    'RMAECMAEVoxelNeXt': RMAECMAEVoxelNeXt
 }
 
 
