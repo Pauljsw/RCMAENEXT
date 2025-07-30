@@ -1,0 +1,64 @@
+# ===== tools/cfgs/custom_models/rmae_cmae_pretraining.yaml =====
+# R-MAE + CMAE-3D Pretraining 전용 설정
+
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    # Pretraining에서는 최소한의 증강 (원본 구조 보존)
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['gt_sampling']
+        AUG_CONFIG_LIST:
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.98, 1.02]
+
+MODEL:
+    NAME: RMAECMAEVoxelNeXt
+    
+    # CMAE-3D 손실 가중치 (pretraining 최적화)
+    OCCUPANCY_WEIGHT: 1.0     # R-MAE 기본 손실
+    FEATURE_WEIGHT: 0.3       # MLFR (pretraining에서는 낮게)
+    CONTRASTIVE_WEIGHT: 0.4   # HRCL (pretraining에서는 낮게)
+    TEMPERATURE: 0.2
+    
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: RMAECMAEBackboneComplete
+        
+        # R-MAE 파라미터
+        MASKED_RATIO: 0.8
+        ANGULAR_RANGE: 1
+        PRETRAINING: True        # ✅ 중요: Pretraining 모드
+        
+        # CMAE-3D 파라미터
+        MOMENTUM: 0.999
+        TEMPERATURE: 0.2
+
+    # Pretraining에서는 detection head 없음
+    POST_PROCESSING:
+        EVAL_METRIC: mae_loss
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 4    # Pretraining은 더 큰 배치
+    NUM_EPOCHS: 50           # Pretraining은 더 많은 epoch
+    
+    OPTIMIZER: adam_onecycle
+    LR: 0.0005              # Pretraining용 낮은 LR
+    WEIGHT_DECAY: 0.01
+    MOMENTUM: 0.9
+    
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [35, 45]
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+    
+    LR_WARMUP: True          # Pretraining에서는 warmup 사용
+    WARMUP_EPOCH: 2
+    GRAD_NORM_CLIP: 10

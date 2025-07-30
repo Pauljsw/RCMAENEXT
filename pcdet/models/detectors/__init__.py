@@ -15,7 +15,7 @@ from .pillarnet import PillarNet
 from .voxelnext import VoxelNeXt
 from .voxel_mae import VoxelMAE
 from .rmae_voxelnext import RMAEVoxelNeXt
-from .cmae_voxelnext_complete import CMAEVoxelNeXtComplete, RMAECMAEVoxelNeXt
+from .cmae_voxelnext_complete import RMAECMAEVoxelNeXt, CMAEVoxelNeXt, RMAEVoxelNeXt
 
 __all__ = {
     'Detector3DTemplate': Detector3DTemplate,
@@ -35,8 +35,9 @@ __all__ = {
     'VoxelNeXt': VoxelNeXt,
     'VoxelMAE': VoxelMAE,
     'RMAEVoxelNeXt' : RMAEVoxelNeXt,
-    'CMAEVoxelNeXtComplete': CMAEVoxelNeXtComplete,
     'RMAECMAEVoxelNeXt': RMAECMAEVoxelNeXt,
+    'CMAEVoxelNeXt': CMAEVoxelNeXt,
+    'RMAEVoxelNeXt': RMAEVoxelNeXt,
 }
 
 
