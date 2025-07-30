@@ -1,0 +1,66 @@
+# ===== 최종 통합 설정 파일 예시 =====
+# tools/cfgs/custom_models/rmae_cmae_voxelnext_final.yaml
+
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    # ✅ 기존 성공한 데이터 증강 설정 유지
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['gt_sampling']
+        AUG_CONFIG_LIST:
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.98, 1.02]
+
+MODEL:
+    NAME: RMAECMAEVoxelNeXt  # ✅ 통합 모델명
+    
+    # ✅ CMAE-3D 손실 가중치 (논문 최적값)
+    OCCUPANCY_WEIGHT: 1.0     # R-MAE occupancy loss
+    FEATURE_WEIGHT: 0.5       # MLFR feature reconstruction loss  
+    CONTRASTIVE_WEIGHT: 0.6   # HRCL contrastive loss (λ=0.6)
+    TEMPERATURE: 0.2          # Contrastive learning temperature
+    
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: RMAECMAEBackbone  # ✅ 통합 백본명
+        
+        # ✅ R-MAE 성공 파라미터 유지
+        MASKED_RATIO: 0.8
+        ANGULAR_RANGE: 1
+        PRETRAINING: True
+        
+        # ✅ CMAE-3D 파라미터
+        MOMENTUM: 0.999          # Teacher EMA momentum
+        TEMPERATURE: 0.2         # Contrastive temperature
+
+    # ✅ Pretraining 모드에서는 DENSE_HEAD 제거
+    POST_PROCESSING:
+        RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+        EVAL_METRIC: kitti
+
+OPTIMIZATION:
+    # ✅ 기존 성공 설정 유지
+    BATCH_SIZE_PER_GPU: 8
+    NUM_EPOCHS: 30
+
+    OPTIMIZER: adam_onecycle
+    LR: 0.001
+    WEIGHT_DECAY: 0.01
+    MOMENTUM: 0.9
+
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [20, 25]
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+
+    LR_WARMUP: False
+    WARMUP_EPOCH: 1
+    GRAD_NORM_CLIP: 10
