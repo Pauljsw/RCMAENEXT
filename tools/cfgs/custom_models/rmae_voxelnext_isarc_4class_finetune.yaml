@@ -36,7 +36,7 @@ MODEL:
         NAME: MeanVFE
 
     BACKBONE_3D:
-        NAME: VoxelResBackBone8xVoxelNeXt
+        NAME: VoxelResBackBone8xVoxelNeXt 
 
     DENSE_HEAD:
         NAME: VoxelNeXtHead
@@ -89,22 +89,22 @@ MODEL:
         EVAL_METRIC: kitti
 
 OPTIMIZATION:
-    BATCH_SIZE_PER_GPU: 8
-    NUM_EPOCHS: 30 
+    BATCH_SIZE_PER_GPU: 6
+    NUM_EPOCHS: 25
 
     OPTIMIZER: adam_onecycle
-    LR: 0.001
-    WEIGHT_DECAY: 0.01
+    LR: 0.0006
+    WEIGHT_DECAY: 0.005
     MOMENTUM: 0.9
 
     MOMS: [0.95, 0.85]
     PCT_START: 0.4
     DIV_FACTOR: 10
-    DECAY_STEP_LIST: [20, 25]  
+    DECAY_STEP_LIST: [18, 22]  
     LR_DECAY: 0.1
     LR_CLIP: 0.0000001
 
     LR_WARMUP: True    
-    WARMUP_EPOCH: 3         
+    WARMUP_EPOCH: 2         
 
     GRAD_NORM_CLIP: 10
