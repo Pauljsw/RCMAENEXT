@@ -1,11 +1,12 @@
 DATASET: 'CustomDataset'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0723_mixed_train_3channel'
+DATA_PATH: '/home/sungwoo/VoxelNeXt/data/isarc_train_3channel'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/isarc_test_3channel'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/isarc_test'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0528_real_synthetic_3channel'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0528_real_synthetic'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0704_LLM2'
-DATA_PATH: '/home/sungwoo/VoxelNeXt/data/isarc_train'
+# DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0801_RealLaserConfig'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0721_dense_DEGR_Mid_Mixed'
 # DATA_PATH: '/home/sungwoo/VoxelNeXt/data/0722_Noiseup_densemedium'
 POINT_CLOUD_RANGE: [-70.4, -70.4, -6, 70.4, 70.4, 10]
@@ -26,8 +27,8 @@ INFO_PATH: {
 }
 POINT_FEATURE_ENCODING: {
     encoding_type: absolute_coordinates_encoding,
-    used_feature_list: ['x', 'y', 'z','intensity'],
-    src_feature_list: ['x', 'y', 'z','intensity'],
+    used_feature_list: ['x', 'y', 'z'],
+    src_feature_list: ['x', 'y', 'z'],
 }
 DATA_AUGMENTOR:
     DISABLE_AUG_LIST: ['placeholder']
@@ -40,14 +41,14 @@ DATA_AUGMENTOR:
           BACKUP_DB_INFO:
               DB_INFO_PATH: custom_dbinfos_train.pkl
               DB_DATA_PATH: gt_database/custom_database.npy
-              NUM_POINT_FEATURES: 4
+              NUM_POINT_FEATURES: 3
           
           PREPARE: {
              filter_by_min_points: ['dumptruck:15', 'dozer:15', 'excavator:15', 'grader:15', 'roller:15'],
              #filter_by_difficulty: [-1],
           }
           SAMPLE_GROUPS: ['dumptruck:15', 'dozer:15', 'excavator:15', 'grader:15', 'roller:15']
-          NUM_POINT_FEATURES: 4
+          NUM_POINT_FEATURES: 3
           DATABASE_WITH_FAKELIDAR: False
           REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
           LIMIT_WHOLE_SCENE: True

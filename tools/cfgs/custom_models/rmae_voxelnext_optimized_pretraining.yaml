@@ -1,0 +1,96 @@
+# cfgs/custom_models/rmae_voxelnext_optimized_pretraining.yaml
+# 최적화된 R-MAE VoxelNeXt Pretraining 설정
+
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    # ✅ 기존 성공한 데이터 증강 설정 유지
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['gt_sampling']
+        AUG_CONFIG_LIST:
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.98, 1.02]
+
+MODEL:
+    NAME: RMAEVoxelNeXtOptimized  # 🚀 새로운 최적화된 모델
+    
+    # ===== 📊 최적화된 Loss 가중치 =====
+    OCCUPANCY_WEIGHT: 1.2         # 1.0 → 1.2 (더 강한 occupancy learning)
+    CONSISTENCY_WEIGHT: 0.3       # 새로 추가: Multi-scale consistency
+    AUX_WEIGHT: 0.5              # 새로 추가: Auxiliary loss weight
+    
+    # ===== 🎯 Advanced Loss 설정 =====
+    USE_FOCAL_LOSS: True         # Focal loss for class imbalance
+    FOCAL_LOSS_ALPHA: 0.25       # Focal loss alpha
+    FOCAL_LOSS_GAMMA: 2.0        # Focal loss gamma
+    OCCUPANCY_THRESHOLD: 0.5     # Occupancy threshold
+    HARD_NEGATIVE_RATIO: 3.0     # Hard negative mining ratio
+    
+    # ===== 🔄 Progressive Training 설정 =====
+    PROGRESSIVE_TRAINING: True   # Progressive weight scheduling
+    WARMUP_EPOCHS: 5             # Warmup epochs for progressive training
+    SMOOTHING_WINDOW: 20         # Loss smoothing window
+    
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: RadialMAEVoxelNeXtOptimized  # 🏗️ 새로운 최적화된 백본
+        
+        # ===== 📊 최적화된 Masking 파라미터 =====
+        MASKED_RATIO: 0.85                # 0.8 → 0.85 (더 높은 masking)
+        ANGULAR_RANGE: 5                  # 1 → 5도 (더 효율적)
+        
+        # ===== 🎯 Distance-aware Masking =====
+        DISTANCE_RANGES: [0, 20, 40, 80] # Distance ranges in meters
+        DISTANCE_MASK_RATIOS: [0.7, 0.8, 0.9, 0.95]  # 근거리 낮은 masking
+        
+        # ===== 📈 Dynamic Minimum Voxel =====
+        MIN_VOXEL_RATIO: 0.08            # 8% minimum (논문 기준)
+        ADAPTIVE_THRESHOLD: True         # Adaptive threshold
+        
+        # ===== 🔄 Progressive Masking =====
+        PROGRESSIVE_MASKING: True        # Progressive masking ratio
+        INITIAL_MASK_RATIO: 0.6          # 초기 낮은 masking
+        FINAL_MASK_RATIO: 0.85           # 최종 높은 masking
+        TOTAL_TRAINING_STEPS: 35000      # 35 epochs * ~1000 steps
+        
+        PRETRAINING: True
+
+    # ✅ Pretraining 모드에서는 DENSE_HEAD 제거
+    POST_PROCESSING:
+        RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+        EVAL_METRIC: kitti
+
+OPTIMIZATION:
+    # ===== 🚀 최적화된 학습 설정 =====
+    BATCH_SIZE_PER_GPU: 6            # 8 → 6 (메모리 효율성)
+    NUM_EPOCHS: 35                   # 30 → 35 (더 긴 학습)
+
+    OPTIMIZER: adam_onecycle
+    LR: 0.0008                       # 0.001 → 0.0008 (더 안정적)
+    WEIGHT_DECAY: 0.005              # 0.01 → 0.005 (less regularization)
+    MOMENTUM: 0.9
+
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [25, 30]        # 35 epochs에 맞게 조정
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+
+    # ===== 📈 개선된 Warmup 설정 =====
+    LR_WARMUP: True                  # Warmup 활성화
+    WARMUP_EPOCH: 3                  # 더 긴 warmup
+    
+    GRAD_NORM_CLIP: 10
+
+# ===== 🔧 추가 최적화 설정 =====
+HOOK:
+    DisableAugmentationHook:
+        DISABLE_AUG_LIST: ['gt_sampling']
+        NUM_LAST_EPOCHS: 5           # 마지막 5 epochs는 augmentation 비활성화

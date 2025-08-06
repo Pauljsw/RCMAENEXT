@@ -1,70 +1,127 @@
 # tools/cfgs/custom_models/rmae_cmae_voxelnext_pretraining.yaml
-# 기존 성공한 rmae_voxelnext_isarc_4class_pretraining.yaml을 기반으로 CMAE 요소 추가
+# ✅ R-MAE + CMAE-3D VoxelNeXt Pretraining 전용 설정
 
-CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+CLASS_NAMES: ['Vehicle', 'Pedestrian', 'Cyclist']
 
 DATA_CONFIG:
     _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    POINT_CLOUD_RANGE: [-75.2, -75.2, -2, 75.2, 75.2, 4]
     
-    # ✅ 기존 성공 로직: 동일한 데이터 증강 설정
+    # Pretraining에서는 GT bbox 사용 안함
     DATA_AUGMENTOR:
         DISABLE_AUG_LIST: ['gt_sampling']
         AUG_CONFIG_LIST:
             - NAME: random_world_flip
-              ALONG_AXIS_LIST: ['x']
+              ALONG_AXIS_LIST: ['x', 'y']
+
+            - NAME: random_world_rotation
+              WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+
             - NAME: random_world_scaling
-              WORLD_SCALE_RANGE: [0.98, 1.02]
+              WORLD_SCALE_RANGE: [0.95, 1.05]
+
+    DATA_PROCESSOR:
+        - NAME: mask_points_and_boxes_outside_range
+          REMOVE_OUTSIDE_BOXES: True
+
+        - NAME: shuffle_points
+          SHUFFLE_ENABLED: {
+            'train': True,
+            'test': False
+          }
+
+        - NAME: transform_points_to_voxels_placeholder
+          VOXEL_SIZE: [0.1, 0.1, 0.15]
 
 MODEL:
-    NAME: RMAECMAEVoxelNeXt  # ➕ 새로운 통합 모델명
+    NAME: RMAECMAEVoxelNeXt
     
-    # ➕ CMAE-3D 손실 가중치 (논문 기반)
-    OCCUPANCY_WEIGHT: 1.0     # R-MAE occupancy loss
-    CONTRASTIVE_WEIGHT: 0.6   # CMAE contrastive loss (λ=0.6 optimal)
-    FEATURE_WEIGHT: 0.5       # CMAE feature reconstruction loss
-    
-    # ➕ CMAE-3D 논문 파라미터
-    TEMPERATURE: 0.1          # Contrastive learning temperature
+    # ✅ Pretraining 모드 활성화
+    PRETRAINING: True
     
     VFE:
         NAME: MeanVFE
 
     BACKBONE_3D:
-        NAME: RMAECMAEBackbone  # ➕ 새로운 통합 백본명
+        NAME: RMAECMAEBackbone
         
-        # ✅ 기존 성공 R-MAE 파라미터 그대로
-        MASKED_RATIO: 0.8
-        ANGULAR_RANGE: 1
-        PRETRAINING: True
+        # ✅ R-MAE 설정 (Pretraining용)
+        RMAE:
+            MASKED_RATIO: 0.8          # 80% masking
+            ANGULAR_RANGE: 5           # 5도 단위
+            NUM_ANGULAR_GROUPS: 72     # 360/5 = 72 groups
+            DISTANCE_THRESHOLDS: [20, 40, 60]
+            DISTANCE_MASK_RATIOS: [0.5, 0.7, 0.9]  # 거리별 차등 마스킹
         
-        # ➕ CMAE-3D 새 파라미터 (논문 기반)
-        MOMENTUM: 0.999          # Teacher EMA momentum
-        TEMPERATURE: 0.2         # Contrastive learning temperature
+        # ✅ CMAE-3D 설정 (Pretraining용)
+        CMAE:
+            USE_TEACHER_STUDENT: True
+            EMA_MOMENTUM: 0.999        # Teacher EMA update
+            
+            USE_MLFR: True             # Multi-scale Latent Feature Reconstruction
+            MLFR:
+                SCALES: ['x_conv1', 'x_conv2', 'x_conv3', 'x_conv4']
+                FEATURE_DIMS: [16, 32, 64, 128]
+                
+            USE_HRCL: True             # Hierarchical Relational Contrastive Learning
+            HRCL:
+                VOXEL_EMBED_DIM: 256
+                FRAME_EMBED_DIM: 512
+                TEMPERATURE: 0.2
+                MEMORY_SIZE: 65536
+                MOMENTUM: 0.999
 
-    # ✅ 기존 성공 로직: DENSE_HEAD 섹션 완전 제거 (pretraining에서는 불필요)
+    # ✅ Pretraining에서는 Detection Head 비활성화
+    DENSE_HEAD:
+        NAME: AnchorHeadSingle
+        CLASS_AGNOSTIC: False
+        ENABLED: False  # Pretraining에서는 사용 안함
+
+    # ✅ Pretraining 전용 손실 가중치
+    LOSS_CONFIG:
+        # MAE 손실들만 사용
+        OCCUPANCY_WEIGHT: 1.0      # R-MAE occupancy loss
+        FEATURE_WEIGHT: 0.5        # CMAE MLFR loss  
+        CONTRASTIVE_WEIGHT: 0.6    # CMAE HRCL loss (λ=0.6)
+        
+        # Detection 손실은 0으로 설정
+        LOSS_WEIGHTS: {
+            'cls_weight': 0.0,
+            'loc_weight': 0.0,
+            'dir_weight': 0.0,
+            'code_weights': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        }
 
     POST_PROCESSING:
         RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
-        EVAL_METRIC: kitti
+        SCORE_THRESH: 0.1
+        OUTPUT_RAW_SCORE: False
+        EVAL_METRIC: waymo
+        NMS_CONFIG:
+            MULTI_CLASSES_NMS: False
+            NMS_TYPE: nms_gpu
+            NMS_THRESH: 0.01
+            NMS_PRE_MAXSIZE: 4096
+            NMS_POST_MAXSIZE: 500
 
+# ✅ Pretraining 최적화 설정
 OPTIMIZATION:
-    # ✅ 기존 성공 설정 그대로 (잘 작동했던 설정)
-    BATCH_SIZE_PER_GPU: 8
-    NUM_EPOCHS: 30
+    BATCH_SIZE_PER_GPU: 8      # Pretraining은 큰 배치 유리
+    NUM_EPOCHS: 30             # 30 epochs pretraining
 
     OPTIMIZER: adam_onecycle
-    LR: 0.001                 # ✅ Pretraining용 낮은 학습률
+    LR: 0.003                  # Pretraining용 learning rate
     WEIGHT_DECAY: 0.01
     MOMENTUM: 0.9
 
     MOMS: [0.95, 0.85]
     PCT_START: 0.4
     DIV_FACTOR: 10
-    DECAY_STEP_LIST: [20, 25]  # ✅ 30 epoch에 맞게 조정
+    DECAY_STEP_LIST: [20, 25]
     LR_DECAY: 0.1
     LR_CLIP: 0.0000001
 
-    LR_WARMUP: False
-    WARMUP_EPOCH: 1
+    LR_WARMUP: True
+    WARMUP_EPOCH: 2
 
     GRAD_NORM_CLIP: 10

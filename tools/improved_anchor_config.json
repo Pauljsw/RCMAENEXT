@@ -1,0 +1,134 @@
+{
+  "partial_detection_analysis": {
+    "dumptruck": {
+      "normal_size": 8.944350364963503,
+      "partial_threshold": 5.366610218978102,
+      "min_size": 3.74,
+      "max_size": 14.51,
+      "suspected_partial_ratio": 0.15103158950585904,
+      "iqr_lower": 6.119999999999998,
+      "iqr_upper": 11.64
+    },
+    "excavator": {
+      "normal_size": 9.596416349809886,
+      "partial_threshold": 5.757849809885931,
+      "min_size": 4.92,
+      "max_size": 15.99,
+      "suspected_partial_ratio": 0.07568652302492603,
+      "iqr_lower": 1.6599999999999993,
+      "iqr_upper": 17.740000000000002
+    },
+    "grader": {
+      "normal_size": 10.232103321033211,
+      "partial_threshold": 6.139261992619926,
+      "min_size": 6.73,
+      "max_size": 11.45,
+      "suspected_partial_ratio": 0,
+      "iqr_lower": 9.065,
+      "iqr_upper": 11.345
+    },
+    "roller": {
+      "normal_size": 6.320445859872612,
+      "partial_threshold": 3.792267515923567,
+      "min_size": 4.09,
+      "max_size": 7.38,
+      "suspected_partial_ratio": 0,
+      "iqr_lower": 4.95,
+      "iqr_upper": 7.989999999999999
+    }
+  },
+  "multiscale_anchor_config": [
+    {
+      "class_name": "dumptruck",
+      "anchor_sizes": [
+        [
+          8.6,
+          3.8,
+          3.8
+        ]
+      ],
+      "anchor_rotations": [
+        0,
+        1.57
+      ],
+      "anchor_bottom_heights": [
+        -1.78
+      ],
+      "align_center": false,
+      "feature_map_stride": 8,
+      "matched_threshold": 0.6,
+      "unmatched_threshold": 0.45
+    },
+    {
+      "class_name": "excavator",
+      "anchor_sizes": [
+        [
+          8.7,
+          4.9,
+          5.5
+        ]
+      ],
+      "anchor_rotations": [
+        0,
+        1.57
+      ],
+      "anchor_bottom_heights": [
+        -1.78
+      ],
+      "align_center": false,
+      "feature_map_stride": 8,
+      "matched_threshold": 0.6,
+      "unmatched_threshold": 0.45
+    },
+    {
+      "class_name": "grader",
+      "anchor_sizes": [
+        [
+          10.1,
+          3.9,
+          4.1
+        ]
+      ],
+      "anchor_rotations": [
+        0,
+        1.57
+      ],
+      "anchor_bottom_heights": [
+        -1.78
+      ],
+      "align_center": false,
+      "feature_map_stride": 8,
+      "matched_threshold": 0.6,
+      "unmatched_threshold": 0.45
+    },
+    {
+      "class_name": "roller",
+      "anchor_sizes": [
+        [
+          6.8,
+          3.5,
+          3.6
+        ]
+      ],
+      "anchor_rotations": [
+        0,
+        1.57
+      ],
+      "anchor_bottom_heights": [
+        -1.78
+      ],
+      "align_center": false,
+      "feature_map_stride": 8,
+      "matched_threshold": 0.6,
+      "unmatched_threshold": 0.45
+    }
+  ],
+  "recommendations": [
+    {
+      "class": "dumptruck",
+      "issue": "Moderate partial acquisition",
+      "action": "Consider data cleaning",
+      "priority": "Medium"
+    }
+  ]
+}
