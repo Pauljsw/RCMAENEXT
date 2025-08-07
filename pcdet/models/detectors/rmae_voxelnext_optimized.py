@@ -334,6 +334,7 @@ class RMAEVoxelNeXtOptimized(Detector3DTemplate):
         # ===== Fine-tuning/Inference mode =====
         else:
             return self._forward_detection(batch_dict)
+            
     
     def _is_pretraining_mode(self):
         """Pretraining 모드 확인"""
