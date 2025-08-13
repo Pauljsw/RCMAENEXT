@@ -1,0 +1,61 @@
+# cfgs/custom_models/rmae_voxelnext_clean_pretraining.yaml
+#
+# 🎯 Clean R-MAE + VoxelNeXt Pretraining Config
+# 공식 R-MAE GitHub 코드 스타일로 단순화
+
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    # 📍 Pretraining용 최소한의 augmentation (공식 스타일)
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['gt_sampling']  # Pretraining에는 GT sampling 불필요
+        AUG_CONFIG_LIST:
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.98, 1.02]  # 최소한의 scaling
+
+MODEL:
+    NAME: RMAEVoxelNeXtClean  # 새로운 clean detector
+    
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: RadialMAEVoxelNeXtClean  # 새로운 clean backbone
+        
+        # 📍 공식 R-MAE 파라미터 (단순화)
+        MASKED_RATIO: 0.8      # 공식 기본값
+        ANGULAR_RANGE: 1       # 공식 기본값: 1도
+        PRETRAINING: True      # Pretraining 모드
+    
+    # 📍 Pretraining에는 DENSE_HEAD 없음 (공식 스타일)
+    # Detection head는 fine-tuning에서만 사용
+
+    POST_PROCESSING:
+        RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+        EVAL_METRIC: kitti
+
+# 📍 공식 R-MAE 스타일의 최적화 설정
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 4     # 공식과 동일
+    NUM_EPOCHS: 30            # 공식과 동일
+
+    OPTIMIZER: adam_onecycle  # 공식과 동일
+    LR: 0.003                 # 공식과 동일
+    WEIGHT_DECAY: 0.01        # 공식과 동일
+    MOMENTUM: 0.9
+
+    MOMS: [0.95, 0.85]        # 공식과 동일
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [20, 25]
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+
+    LR_WARMUP: False          # 공식과 동일
+    WARMUP_EPOCH: 1
+
+    GRAD_NORM_CLIP: 10        # 공식과 동일

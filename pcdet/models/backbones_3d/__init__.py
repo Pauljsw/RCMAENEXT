@@ -10,6 +10,7 @@ from .spconv_unet import UNetV2
 from .radial_mae_voxelnext import RadialMAEVoxelNeXt
 from .rmae_cmae_backbone_fixed import RMAECMAEBackbone
 from .radial_mae_voxelnext_optimized import RadialMAEVoxelNeXtOptimized
+from .radial_mae_voxelnext_clean import RadialMAEVoxelNeXtClean
 
 
 __all__ = {
@@ -27,5 +28,6 @@ __all__ = {
     'PillarRes18BackBone8x': PillarRes18BackBone8x,
     'RadialMAEVoxelNeXt': RadialMAEVoxelNeXt,
     'RMAECMAEBackbone': RMAECMAEBackbone,
-    'RadialMAEVoxelNeXtOptimized': RadialMAEVoxelNeXtOptimized
+    'RadialMAEVoxelNeXtOptimized': RadialMAEVoxelNeXtOptimized,
+    'RadialMAEVoxelNeXtClean': RadialMAEVoxelNeXtClean
 }
