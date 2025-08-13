@@ -231,7 +231,7 @@ class RMAEVoxelNeXt(Detector3DTemplate):
     
     def compute_distance_weights(self, occupancy_coords, original_coords):
         """
-        📄 R-MAE 논문 기반 Distance-aware loss weighting + 실제 거리 반환
+        🎯 동일한 논리: Grid 인덱스 → 실제 좌표 → 원점 거리
         """
         if not self.use_distance_weighting:
             weights = torch.ones(len(occupancy_coords), device=occupancy_coords.device)
@@ -240,43 +240,32 @@ class RMAEVoxelNeXt(Detector3DTemplate):
         
         weights = torch.ones(len(occupancy_coords), device=occupancy_coords.device)
         
-        # Voxel 좌표를 실제 거리로 변환 (backbone과 동일)
         voxel_size = getattr(self.module_list[0], 'voxel_size', [0.1, 0.1, 0.1])
         point_cloud_range = getattr(self.module_list[0], 'point_cloud_range', [-70, -40, -3, 70, 40, 1])
         
-        # occupancy_coords는 이미 stride=8 적용된 상태
-        x = occupancy_coords[:, 1].float() * voxel_size[0] * 8 + point_cloud_range[0]
-        y = occupancy_coords[:, 2].float() * voxel_size[1] * 8 + point_cloud_range[1]
-        distances = torch.sqrt(x**2 + y**2)  # 실제 거리 계산
+        # 🎯 Grid 인덱스를 실제 좌표로 변환 (stride=8 고려 + voxel center)
+        world_x = occupancy_coords[:, 1].float() * voxel_size[0] * 8 + point_cloud_range[0] + voxel_size[0] * 4  # stride=8이므로 중심은 *4
+        world_y = occupancy_coords[:, 2].float() * voxel_size[1] * 8 + point_cloud_range[1] + voxel_size[1] * 4
+        world_z = occupancy_coords[:, 3].float() * voxel_size[2] * 8 + point_cloud_range[2] + voxel_size[2] * 4
         
-        # Distance thresholds (backbone과 일치)
-        distance_thresholds = [20, 40, 60]  # meters
+        # 🎯 점군과 동일한 거리 계산
+        distances = torch.sqrt(world_x**2 + world_y**2 + world_z**2)
         
-        # Distance-based weighting
-        near_mask = distances < distance_thresholds[0]
-        mid_mask = (distances >= distance_thresholds[0]) & (distances < distance_thresholds[1])
-        far_mask = distances >= distance_thresholds[1]
+        # 10m/30m 분류
+        near_threshold = 10.0
+        mid_threshold = 30.0
+        
+        near_mask = distances <= near_threshold
+        mid_mask = (distances > near_threshold) & (distances <= mid_threshold)
+        far_mask = distances > mid_threshold
         
         weights[near_mask] = self.distance_loss_weights['NEAR']
         weights[mid_mask] = self.distance_loss_weights['MID']
         weights[far_mask] = self.distance_loss_weights['FAR']
         
-        # compute_distance_weights 함수에 디버그 출력 추가
-        print(f"🔍 Distance Debug:")
-        print(f"   - voxel_size: {voxel_size}")
-        print(f"   - point_cloud_range: {point_cloud_range}")
-        print(f"   - occupancy_coords shape: {occupancy_coords.shape}")
-        print(f"   - occupancy_coords sample: {occupancy_coords[:5]}")
-        print(f"   - x coords sample: {x[:5]}")
-        print(f"   - y coords sample: {y[:5]}")
-        print(f"   - distances sample: {distances[:5]}")
-        print(f"   - distance min/max: {distances.min():.2f}/{distances.max():.2f}")
-        print(f"   - near_mask count: {near_mask.sum()}")
-        print(f"   - mid_mask count: {mid_mask.sum()}")
-        print(f"   - far_mask count: {far_mask.sum()}")
-        
-        return weights, distances  # 🔥 거리 정보도 함께 반환
-    
+        return weights, distances
+
+
     def compute_focal_loss(self, predictions, targets, weights=None):
         """
         📄 Focal Loss for occupancy prediction (class imbalance 해결)

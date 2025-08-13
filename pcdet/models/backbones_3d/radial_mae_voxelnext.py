@@ -187,11 +187,16 @@ class RadialMAEVoxelNeXt(VoxelResBackBone8xVoxelNeXt):
             )
     
     def get_distance_group(self, distances):
-        """거리 기반 subgroup 분류"""
-        # rt1, rt2, rt3에 따라 subgroup 결정
-        near_mask = distances < self.distance_thresholds[0]
-        mid_mask = (distances >= self.distance_thresholds[0]) & (distances < self.distance_thresholds[1])
-        far_mask = distances >= self.distance_thresholds[1]
+        """
+        🔧 수정: 원점 기준 거리를 사용한 near/mid/far 분류
+        """
+        # 당신의 실제 데이터 분포에 맞는 고정 임계값 사용
+        near_threshold = 10.0   # Near: <= 15m (63.80%)
+        mid_threshold = 30.0    # Mid: 15~50m (35.65%), Far: > 50m (0.56%)
+        
+        near_mask = distances <= near_threshold
+        mid_mask = (distances > near_threshold) & (distances <= mid_threshold) 
+        far_mask = distances > mid_threshold
         
         return near_mask, mid_mask, far_mask
     
@@ -269,12 +274,7 @@ class RadialMAEVoxelNeXt(VoxelResBackBone8xVoxelNeXt):
     
     def radial_masking_rmae_paper(self, voxel_coords, voxel_features):
         """
-        📄 R-MAE 논문 정확한 2-Stage Radial Masking 구현
-        
-        M(vi) = {
-            0, if g(vi) ∈ Gs and Bernoulli(pmg(vi),k(vi)) = 1
-            1, otherwise
-        }
+        🎯 점군 직접 사용: batch_dict['points']로 거리 계산 후 voxel masking
         """
         if not self.training or not self.enable_2stage_masking:
             return voxel_coords, voxel_features
@@ -282,67 +282,210 @@ class RadialMAEVoxelNeXt(VoxelResBackBone8xVoxelNeXt):
         batch_size = int(voxel_coords[:, 0].max()) + 1
         masked_coords, masked_features = [], []
         
-        # 통계 수집용
-        total_original = len(voxel_coords)
-        total_kept = 0
-        stage1_stats = {'selected_groups': 0, 'total_groups': self.num_angular_groups}
-        stage2_stats = {'near_masked': 0, 'mid_masked': 0, 'far_masked': 0}
-        
         for batch_idx in range(batch_size):
             mask = voxel_coords[:, 0] == batch_idx
             coords, features = voxel_coords[mask], voxel_features[mask]
             
             if len(coords) == 0:
                 continue
-                
-            # 실제 좌표 계산 (cylindrical coordinates)
-            x = coords[:, 1].float() * self.voxel_size[0] + self.point_cloud_range[0]
-            y = coords[:, 2].float() * self.voxel_size[1] + self.point_cloud_range[1]
             
-            # ri (radial distance), θi (azimuth angle), zi (height)
-            distances = torch.sqrt(x**2 + y**2)  # ri
-            theta = torch.atan2(y, x)            # θi
+            # 🎯 Voxel 좌표를 실제 좌표로 변환 (단순하게)
+            # 각 voxel의 중심점 계산
+            voxel_x = coords[:, 1].float() * self.voxel_size[0] + self.point_cloud_range[0] + self.voxel_size[0] * 0.5
+            voxel_y = coords[:, 2].float() * self.voxel_size[1] + self.point_cloud_range[1] + self.voxel_size[1] * 0.5
+            voxel_z = coords[:, 3].float() * self.voxel_size[2] + self.point_cloud_range[2] + self.voxel_size[2] * 0.5
             
-            # ===== Stage 1: Angular Group Selection =====
+            # 🎯 점군에서 했던 것과 동일한 거리 계산
+            distances = torch.sqrt(voxel_x**2 + voxel_y**2 + voxel_z**2)
+            
+            # Stage 1: Angular Group Selection
+            theta = torch.atan2(voxel_y, voxel_x)
             stage1_keep_mask, group_indices = self.apply_stage1_angular_group_selection(theta)
             
-            # ===== Stage 2: Range-Aware Masking within Selected Groups =====
+            # Stage 2: Range-Aware Masking
             stage2_keep_mask = self.apply_stage2_range_aware_masking(distances, group_indices, stage1_keep_mask)
             
-            # 최종 mask: Stage 1에서 선택되지 않은 것들은 자동으로 keep, Stage 2 결과 적용
-            final_keep_mask = (~stage1_keep_mask) | (stage1_keep_mask & stage2_keep_mask)
+            # 결과 수집
+            final_coords = coords[stage2_keep_mask]
+            final_features = features[stage2_keep_mask]
             
-            # 최소 voxel 보장 (안정성을 위해)
-            min_voxels = max(10, int(len(coords) * 0.05))  # 최소 5%
-            if final_keep_mask.sum() < min_voxels:
-                # 가장 가까운 voxel들을 추가로 keep
-                _, nearest_indices = torch.topk(distances, min_voxels, largest=False)
-                final_keep_mask[nearest_indices] = True
+            if len(final_coords) > 0:
+                masked_coords.append(final_coords)
+                masked_features.append(final_features)
             
-            masked_coords.append(coords[final_keep_mask])
-            masked_features.append(features[final_keep_mask])
-            total_kept += final_keep_mask.sum().item()
+            # 🔍 디버그 출력 (첫 배치만)
+            if batch_idx == 0:
+                near_mask, mid_mask, far_mask = self.get_distance_group(distances)
+                
+                print(f"🎯 Direct Voxel Center Distance:")
+                print(f"   - voxel_size: {self.voxel_size}")
+                print(f"   - point_cloud_range: {self.point_cloud_range}")
+                print(f"   - Voxel center coords range:")
+                print(f"     - X: {voxel_x.min():.2f} ~ {voxel_x.max():.2f}")
+                print(f"     - Y: {voxel_y.min():.2f} ~ {voxel_y.max():.2f}")
+                print(f"     - Z: {voxel_z.min():.2f} ~ {voxel_z.max():.2f}")
+                print(f"   - Distance range: {distances.min():.2f} ~ {distances.max():.2f}m")
+                print(f"   - Near voxels (≤10m): {near_mask.sum()} ({near_mask.sum()/len(coords)*100:.1f}%)")
+                print(f"   - Mid voxels (10~30m): {mid_mask.sum()} ({mid_mask.sum()/len(coords)*100:.1f}%)")
+                print(f"   - Far voxels (>30m): {far_mask.sum()} ({far_mask.sum()/len(coords)*100:.1f}%)")
         
-        # 통계 저장
-        effective_mask_ratio = 1.0 - (total_kept / total_original) if total_original > 0 else 0
-        masking_stats = {
-            'target_mask_ratio': self.masked_ratio,
-            'effective_mask_ratio': effective_mask_ratio,
-            'stage1_stats': stage1_stats,
-            'stage2_stats': stage2_stats,
-            'total_original': total_original,
-            'total_kept': total_kept
-        }
-        
+        # 반환
         if masked_coords:
-            result_coords = torch.cat(masked_coords)
-            result_features = torch.cat(masked_features)
+            return torch.cat(masked_coords, dim=0), torch.cat(masked_features, dim=0)
         else:
-            result_coords = voxel_coords
-            result_features = voxel_features
+            return torch.empty((0, 4), dtype=voxel_coords.dtype, device=voxel_coords.device), \
+                torch.empty((0, voxel_features.shape[1]), dtype=voxel_features.dtype, device=voxel_features.device)
+
+
+    # pcdet/models/backbones_3d/radial_mae_voxelnext.py 수정
+
+    # pcdet/models/backbones_3d/radial_mae_voxelnext.py 수정
+
+    # pcdet/models/backbones_3d/radial_mae_voxelnext.py 수정
+
+    def classify_voxels_accurate_distance(self, voxel_coords, voxel_features, batch_dict):
+        """
+        🎯 정확한 Voxel 분류: 각 voxel 내 점들의 평균 거리로 분류
+        """
+        if not self.training or not self.enable_2stage_masking:
+            return voxel_coords, voxel_features
+            
+        if 'points' not in batch_dict:
+            return voxel_coords, voxel_features
+            
+        points = batch_dict['points']  # [N, 4] (batch_idx, x, y, z)
+        batch_size = int(voxel_coords[:, 0].max()) + 1
+        masked_coords, masked_features = [], []
         
-        return result_coords, result_features, masking_stats
-    
+        for batch_idx in range(batch_size):
+            # 해당 배치의 voxel과 점군 가져오기
+            voxel_mask = voxel_coords[:, 0] == batch_idx
+            coords, features = voxel_coords[voxel_mask], voxel_features[voxel_mask]
+            
+            point_mask = points[:, 0] == batch_idx
+            batch_points = points[point_mask]
+            
+            if len(coords) == 0 or len(batch_points) == 0:
+                continue
+            
+            # 🎯 점군의 거리 계산
+            point_x = batch_points[:, 1]
+            point_y = batch_points[:, 2]
+            point_z = batch_points[:, 3]
+            point_distances = torch.sqrt(point_x**2 + point_y**2 + point_z**2)
+            
+            # 🎯 각 점이 속한 voxel 찾기 (올바른 좌표 순서 사용)
+            point_voxel_x = torch.floor((batch_points[:, 1] - self.point_cloud_range[0]) / self.voxel_size[0]).long()
+            point_voxel_y = torch.floor((batch_points[:, 2] - self.point_cloud_range[1]) / self.voxel_size[1]).long()
+            point_voxel_z = torch.floor((batch_points[:, 3] - self.point_cloud_range[2]) / self.voxel_size[2]).long()
+            
+            # 🎯 각 voxel의 평균 거리 계산
+            voxel_avg_distances = torch.zeros(len(coords), device=coords.device)
+            matched_voxels = 0
+            
+            for i, voxel_coord in enumerate(coords):
+                # voxel 좌표 (z, y, x 순서)
+                voxel_z = voxel_coord[1].item()
+                voxel_y = voxel_coord[2].item()
+                voxel_x = voxel_coord[3].item()
+                
+                # 해당 voxel에 속하는 점들 찾기
+                points_in_voxel = (point_voxel_x == voxel_x) & (point_voxel_y == voxel_y) & (point_voxel_z == voxel_z)
+                
+                if points_in_voxel.sum() > 0:
+                    matched_voxels += 1
+                    # 🎯 해당 voxel에 속하는 점들의 평균 거리 사용
+                    voxel_avg_distances[i] = point_distances[points_in_voxel].mean()
+                else:
+                    # 매칭되지 않는 voxel: voxel 중심점의 거리 사용
+                    voxel_center_x = voxel_x * self.voxel_size[0] + self.point_cloud_range[0] + self.voxel_size[0] * 0.5
+                    voxel_center_y = voxel_y * self.voxel_size[1] + self.point_cloud_range[1] + self.voxel_size[1] * 0.5
+                    voxel_center_z = voxel_z * self.voxel_size[2] + self.point_cloud_range[2] + self.voxel_size[2] * 0.5
+                    
+                    # 🔧 Tensor로 변환
+                    voxel_center_x = torch.tensor(voxel_center_x, device=coords.device)
+                    voxel_center_y = torch.tensor(voxel_center_y, device=coords.device)
+                    voxel_center_z = torch.tensor(voxel_center_z, device=coords.device)
+                    
+                    voxel_center_distance = torch.sqrt(voxel_center_x**2 + voxel_center_y**2 + voxel_center_z**2)
+                    voxel_avg_distances[i] = voxel_center_distance
+            
+            # 🎯 평균 거리 기반으로 voxel 분류
+            near_voxels = voxel_avg_distances <= 10.0
+            mid_voxels = (voxel_avg_distances > 10.0) & (voxel_avg_distances <= 30.0)
+            far_voxels = voxel_avg_distances > 30.0
+            
+            # 🎯 분류별 masking 확률 적용
+            keep_mask = torch.ones(len(coords), dtype=torch.bool, device=coords.device)
+            
+            # 거리별 masking 확률
+            near_keep_prob = 1.0 - 0.50  # 50% mask
+            mid_keep_prob = 1.0 - 0.75   # 75% mask  
+            far_keep_prob = 1.0 - 0.90   # 90% mask
+            
+            # 각 그룹별로 랜덤 masking
+            if near_voxels.sum() > 0:
+                near_keep = torch.rand(near_voxels.sum(), device=coords.device) < near_keep_prob
+                keep_mask[near_voxels] = near_keep
+            
+            if mid_voxels.sum() > 0:
+                mid_keep = torch.rand(mid_voxels.sum(), device=coords.device) < mid_keep_prob
+                keep_mask[mid_voxels] = mid_keep
+            
+            if far_voxels.sum() > 0:
+                far_keep = torch.rand(far_voxels.sum(), device=coords.device) < far_keep_prob
+                keep_mask[far_voxels] = far_keep
+            
+            # 결과 수집
+            final_coords = coords[keep_mask]
+            final_features = features[keep_mask]
+            
+            if len(final_coords) > 0:
+                masked_coords.append(final_coords)
+                masked_features.append(final_features)
+            
+            # 🔍 상세 비교 출력 (첫 배치만)
+            if batch_idx == 0:
+                # 점군 분포 다시 계산
+                point_near = (point_distances <= 10.0).sum()
+                point_mid = ((point_distances > 10.0) & (point_distances <= 30.0)).sum()
+                point_far = (point_distances > 30.0).sum()
+                
+                print(f"🔍 Detailed Distribution Comparison:")
+                print(f"   📊 Point Distribution:")
+                print(f"      - Near (≤10m): {point_near} ({point_near/len(batch_points)*100:.1f}%)")
+                print(f"      - Mid (10~30m): {point_mid} ({point_mid/len(batch_points)*100:.1f}%)")
+                print(f"      - Far (>30m): {point_far} ({point_far/len(batch_points)*100:.1f}%)")
+                
+                print(f"   📊 Voxel Distribution (Average Distance):")
+                print(f"      - Near (≤10m): {near_voxels.sum()} ({near_voxels.sum()/len(coords)*100:.1f}%)")
+                print(f"      - Mid (10~30m): {mid_voxels.sum()} ({mid_voxels.sum()/len(coords)*100:.1f}%)")
+                print(f"      - Far (>30m): {far_voxels.sum()} ({far_voxels.sum()/len(coords)*100:.1f}%)")
+                
+                # 차이 계산
+                near_diff = abs(point_near/len(batch_points)*100 - near_voxels.sum()/len(coords)*100)
+                mid_diff = abs(point_mid/len(batch_points)*100 - mid_voxels.sum()/len(coords)*100)
+                far_diff = abs(point_far/len(batch_points)*100 - far_voxels.sum()/len(coords)*100)
+                
+                print(f"   📊 Distribution Difference:")
+                print(f"      - Near difference: {near_diff:.1f}%")
+                print(f"      - Mid difference: {mid_diff:.1f}%")
+                print(f"      - Far difference: {far_diff:.1f}%")
+                print(f"      - Total difference: {(near_diff + mid_diff + far_diff):.1f}%")
+                
+                print(f"   📊 Matching Info:")
+                print(f"      - Matched voxels: {matched_voxels}/{len(coords)} ({matched_voxels/len(coords)*100:.1f}%)")
+                print(f"      - Final kept voxels: {len(final_coords)} (target: {(1-self.masked_ratio)*100:.1f}%)")
+            
+            break  # 첫 번째 배치만 처리 (디버깅용)
+        
+        # 반환
+        if masked_coords:
+            return torch.cat(masked_coords, dim=0), torch.cat(masked_features, dim=0)
+        else:
+            return torch.empty((0, 4), dtype=voxel_coords.dtype, device=voxel_coords.device), \
+                torch.empty((0, voxel_features.shape[1]), dtype=voxel_features.dtype, device=voxel_features.device)
+
     def radial_masking(self, voxel_coords, voxel_features):
         """기존 간단한 방식 (fallback)"""
         if not self.training:
@@ -391,8 +534,12 @@ class RadialMAEVoxelNeXt(VoxelResBackBone8xVoxelNeXt):
             return torch.cat(masked_coords), torch.cat(masked_features)
         return voxel_coords, voxel_features
     
+
+    
     def forward(self, batch_dict):
-        """기존 VoxelNeXt forward + R-MAE 논문 정확한 masking"""
+        """
+        ✅ 수정된 forward: 점군 직접 사용한 거리 계산
+        """
         voxel_features = batch_dict['voxel_features']
         voxel_coords = batch_dict['voxel_coords']
         batch_size = batch_dict['batch_size']
@@ -402,19 +549,53 @@ class RadialMAEVoxelNeXt(VoxelResBackBone8xVoxelNeXt):
             batch_dict['original_voxel_coords'] = voxel_coords.clone()
             batch_dict['original_voxel_features'] = voxel_features.clone()
             
+            # 🎯 점군 데이터 직접 사용
+            if 'points' in batch_dict:
+                points = batch_dict['points']  # [N, 4] (batch_idx, x, y, z)
+                
+                # 배치별로 처리
+                for batch_idx in range(batch_size):
+                    batch_mask = points[:, 0] == batch_idx
+                    batch_points = points[batch_mask]
+                    
+                    if len(batch_points) == 0:
+                        continue
+                    
+                    # 🎯 점군에서 했던 것과 동일한 거리 계산
+                    point_x = batch_points[:, 1]
+                    point_y = batch_points[:, 2] 
+                    point_z = batch_points[:, 3]
+                    point_distances = torch.sqrt(point_x**2 + point_y**2 + point_z**2)
+                    
+                    print(f"🎯 Direct Point Cloud Distance (Batch {batch_idx}):")
+                    print(f"   - Point count: {len(batch_points)}")
+                    print(f"   - Distance range: {point_distances.min():.2f} ~ {point_distances.max():.2f}m")
+                    
+                    # 거리별 분포 확인
+                    near_points = (point_distances <= 10.0).sum()
+                    mid_points = ((point_distances > 10.0) & (point_distances <= 30.0)).sum()
+                    far_points = (point_distances > 30.0).sum()
+                    
+                    print(f"   - Near points (≤10m): {near_points} ({near_points/len(batch_points)*100:.1f}%)")
+                    print(f"   - Mid points (10~30m): {mid_points} ({mid_points/len(batch_points)*100:.1f}%)")
+                    print(f"   - Far points (>30m): {far_points} ({far_points/len(batch_points)*100:.1f}%)")
+                    print(f"   - 🎯 Your analysis: Near ~64%, Mid ~36%, Far ~1%")
+                    
+                    break  # 첫 배치만 출력
+            
             # 📄 R-MAE 논문 정확한 2-Stage masking 사용
             if self.enable_2stage_masking:
-                voxel_coords, voxel_features, masking_stats = self.radial_masking_rmae_paper(voxel_coords, voxel_features)
-                batch_dict['masking_stats'] = masking_stats
+                voxel_coords, voxel_features = self.classify_voxels_accurate_distance(voxel_coords, voxel_features, batch_dict)
                 
-                print(f"🎯 R-MAE Masking: Target {masking_stats['target_mask_ratio']:.1%} → "
-                      f"Actual {masking_stats['effective_mask_ratio']:.1%}")
-            else:
-                # Fallback to simple method
-                voxel_coords, voxel_features = self.radial_masking(voxel_coords, voxel_features)
+                original_count = len(batch_dict['original_voxel_coords'])
+                current_count = len(voxel_coords)
+                actual_mask_ratio = 1.0 - (current_count / original_count) if original_count > 0 else 0.0
+                
+                print(f"🎯 R-MAE Masking: Target {self.masked_ratio:.1%} → Actual {actual_mask_ratio:.1%}")
             
             batch_dict['voxel_coords'] = voxel_coords
             batch_dict['voxel_features'] = voxel_features
+
         
         # 부모 클래스의 forward 호출 (기존 VoxelNeXt 로직)
         input_sp_tensor = spconv.SparseConvTensor(
