@@ -1,14 +1,8 @@
-# cfgs/custom_models/rmae_voxelnext_clean_finetune.yaml
-#
-# 🎯 Clean R-MAE Fine-tuning Config (공식 R-MAE 방식)
-# 기존 VoxelNeXt 모델로 fine-tuning + pretrained R-MAE weights 로드
-
 CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
 
 DATA_CONFIG:
     _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
     
-    # 📍 Fine-tuning용 full augmentation
     DATA_AUGMENTOR:
         DISABLE_AUG_LIST: ['placeholder']
         AUG_CONFIG_LIST:
@@ -36,15 +30,14 @@ DATA_CONFIG:
               WORLD_SCALE_RANGE: [0.95, 1.05]
 
 MODEL:
-    NAME: VoxelNeXt  # ✅ 공식 방식: 기존 VoxelNeXt 사용!
+    NAME: VoxelNeXt
     
     VFE:
         NAME: MeanVFE
 
     BACKBONE_3D:
-        NAME: VoxelResBackBone8xVoxelNeXt  # ✅ 공식 방식: 기존 backbone!
+        NAME: VoxelResBackBone8xVoxelNeXt 
 
-    # 📍 Fine-tuning에는 DENSE_HEAD 필수
     DENSE_HEAD:
         NAME: VoxelNeXtHead
         CLASS_AGNOSTIC: False
@@ -75,29 +68,30 @@ MODEL:
             MIN_RADIUS: 2
 
         LOSS_CONFIG:
-            LOSS_WEIGHTS:
-                'cls_weight': 1.0
-                'loc_weight': 0.25
+            LOSS_WEIGHTS: {
+                'cls_weight': 1.0,
+                'loc_weight': 1.0,
                 'code_weights': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            }
+
+        POST_PROCESSING:
+            SCORE_THRESH: 0.1
+            POST_CENTER_LIMIT_RANGE: [-70.4, -70.4, -6, 70.4, 70.4, 10]
+            MAX_OBJ_PER_SAMPLE: 500
+            NMS_CONFIG:
+                NMS_TYPE: nms_gpu
+                NMS_THRESH: 0.1
+                NMS_PRE_MAXSIZE: 4096
+                NMS_POST_MAXSIZE: 500
 
     POST_PROCESSING:
         RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
-        SCORE_THRESH: 0.1
-        OUTPUT_RAW_SCORE: False
-
         EVAL_METRIC: kitti
-
-        NMS_CONFIG:
-            MULTI_CLASSES_NMS: False
-            NMS_TYPE: nms_gpu
-            NMS_THRESH: 0.2
-            NMS_PRE_MAXSIZE: 1000
-            NMS_POST_MAXSIZE: 83
 
 # 📍 Fine-tuning 최적화 설정
 OPTIMIZATION:
     BATCH_SIZE_PER_GPU: 4
-    NUM_EPOCHS: 50
+    NUM_EPOCHS: 30
 
     OPTIMIZER: adam_onecycle
     LR: 0.001                 # Pretraining보다 낮은 학습률
