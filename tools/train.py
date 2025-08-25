@@ -156,6 +156,12 @@ def main():
 
     optimizer = build_optimizer(model, cfg.OPTIMIZATION)
 
+
+    logger.info("="*60)
+    for i, group in enumerate(optimizer.param_groups):
+        logger.info(f"Parameter Group {i}: LR = {group['lr']:.2e}, Parameters = {sum(p.numel() for p in group['params']):,}")
+    logger.info("="*60)
+    
     # load checkpoint if it is possible
     start_epoch = it = 0
     last_epoch = -1

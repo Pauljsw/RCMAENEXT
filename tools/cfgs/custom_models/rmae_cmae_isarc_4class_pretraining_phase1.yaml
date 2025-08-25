@@ -1,0 +1,97 @@
+# cfgs/custom_models/rmae_cmae_isarc_4class_pretraining_phase1.yaml
+
+
+# ✅ 기존과 동일한 클래스명 사용
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    # ✅ 기존과 동일한 base config 사용
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    # ✅ 기존 R-MAE pretraining과 동일한 augmentation (gt_sampling 비활성화)
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['gt_sampling']  # pretraining에서는 gt_sampling 비활성화
+        AUG_CONFIG_LIST:
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.98, 1.02]  # 기존과 동일
+
+MODEL:
+    NAME: RMAECMAEDetectorPhase1  # 🔥 새로운 Phase 1 detector
+
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: RMAECMAEBackbonePhase1  # 🔥 새로운 Phase 1 backbone
+        
+        # ===== 📄 기존 R-MAE 설정 완전 복사 =====
+        MASKED_RATIO: 0.8
+        
+        # Stage 1: Angular Group Selection
+        NUM_ANGULAR_GROUPS: 36          # Ng = 36 groups
+        ANGULAR_GROUP_SIZE: 10          # Δθ = 10 degrees (360/36)
+        
+        # Stage 2: 10m/30m 기준 Range-Aware Masking 
+        DISTANCE_THRESHOLDS: [10, 30]   # Near≤10m, Mid 10~30m, Far>30m
+        RANGE_MASK_PROBS:               # 10m/30m 기준 마스킹 확률
+            NEAR: 0.50      # Near≤10m: 50% 마스킹 (세부사항 보존)
+            MID: 0.75       # Mid 10~30m: 75% 마스킹 (표준)
+            FAR: 0.90       # Far>30m: 90% 마스킹 (높은 마스킹)
+        
+        # 논문 구현 옵션
+        USE_BERNOULLI_MASKING: True     # Bernoulli distribution 사용
+        ENABLE_2STAGE_MASKING: True     # 2-Stage masking 활성화
+        
+        # ===== 🔥 Phase 1: Teacher-Student 설정 =====
+        ENABLE_TEACHER_STUDENT: True      # Teacher-Student architecture 활성화
+        TEACHER_STUDENT_MODE: 'phase1'    # Phase 1 모드
+        
+        # Teacher-Student 파라미터 (Phase 1에서는 기본값)
+        TEACHER_BACKBONE_TYPE: 'identical'  # Teacher = Student backbone (현재)
+        FEATURE_DIM: 128                    # Feature projection 차원
+        
+        # 📍 Pretraining 모드 설정
+        PRETRAINING: True                   # R-MAE occupancy prediction 활성화
+
+    # ✅ Pretraining 모드에서는 DENSE_HEAD 제거 (R-MAE 표준)
+
+    POST_PROCESSING:
+        RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+        EVAL_METRIC: kitti
+
+# ===== 🚀 Loss 가중치 설정 =====  
+LOSS_CONFIG:
+    RMAE_WEIGHT: 1.0                    # R-MAE occupancy loss 가중치
+    TEACHER_STUDENT_WEIGHT: 0.0         # Phase 1에서는 비활성화 (Phase 2에서 0.6으로 설정 예정)
+
+OPTIMIZATION:
+    # ===== 📊 기존 R-MAE 최적화 설정 완전 복사 =====
+    BATCH_SIZE_PER_GPU: 8               # 기존과 동일
+    NUM_EPOCHS: 30                       # 기존과 동일
+
+    OPTIMIZER: adam_onecycle             # 기존과 동일
+    LR: 0.001                            # 기존과 동일 (Pretraining용 낮은 학습률)
+    WEIGHT_DECAY: 0.01                   # 기존과 동일
+    MOMENTUM: 0.9                        # 기존과 동일
+
+    MOMS: [0.95, 0.85]                   # 기존과 동일
+    PCT_START: 0.4                       # 기존과 동일
+    DIV_FACTOR: 10                       # 기존과 동일
+    DECAY_STEP_LIST: [20, 25]            # 기존과 동일 (30 epochs에 맞게 조정)
+    LR_DECAY: 0.1                        # 기존과 동일
+    LR_CLIP: 0.0000001                   # 기존과 동일
+
+    # Warmup 설정 (기존과 동일)
+    LR_WARMUP: False                     # 기존과 동일
+    WARMUP_EPOCH: 1                      # 기존과 동일
+    
+    GRAD_NORM_CLIP: 10                   # 기존과 동일
+
+# ===== 📝 Phase 1 실험 태그 =====
+EXPERIMENT:
+    PHASE: 1
+    DESCRIPTION: 'Teacher-Student architecture baseline with exact R-MAE compatibility'
+    FEATURES: ['teacher_student_architecture', 'rmae_full_compatibility']
+    EXPECTED_IMPROVEMENT: 'Infrastructure for Phase 2 while maintaining R-MAE performance'

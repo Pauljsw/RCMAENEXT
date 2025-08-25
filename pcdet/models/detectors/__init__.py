@@ -18,6 +18,7 @@ from .rmae_voxelnext import RMAEVoxelNeXt
 from .rmae_cmae_voxelnext_fixed import RMAECMAEVoxelNeXt
 from .rmae_voxelnext_optimized import RMAEVoxelNeXtOptimized
 from .rmae_voxelnext_clean import RMAEVoxelNeXtClean
+from .rmae_cmae_detector_phase1 import RMAECMAEDetectorPhase1
 
 __all__ = {
     'Detector3DTemplate': Detector3DTemplate,
@@ -39,7 +40,8 @@ __all__ = {
     'RMAEVoxelNeXt' : RMAEVoxelNeXt,
     'RMAECMAEVoxelNeXt': RMAECMAEVoxelNeXt,
     'RMAEVoxelNeXtOptimized': RMAEVoxelNeXtOptimized,
-    'RMAEVoxelNeXtClean' : RMAEVoxelNeXtClean
+    'RMAEVoxelNeXtClean' : RMAEVoxelNeXtClean,
+    'RMAECMAEDetectorPhase1': RMAECMAEDetectorPhase1
 }
 
 

@@ -47,7 +47,14 @@ def train_one_epoch(model, optimizer, train_loader, model_func, lr_scheduler, ac
             cur_lr = optimizer.param_groups[0]['lr']
 
         if tb_log is not None:
-            tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
+            if len(optimizer.param_groups) > 1:
+                # 차등 LR인 경우
+                tb_log.add_scalar('learning_rate/backbone', optimizer.param_groups[0]['lr'], accumulated_iter)
+                tb_log.add_scalar('learning_rate/dense_head', optimizer.param_groups[1]['lr'], accumulated_iter)
+                tb_log.add_scalar('meta_data/learning_rate', optimizer.param_groups[0]['lr'], accumulated_iter)  # 호환성
+            else:
+                # 단일 LR인 경우
+                tb_log.add_scalar('meta_data/learning_rate', cur_lr, accumulated_iter)
 
         model.train()
         optimizer.zero_grad()

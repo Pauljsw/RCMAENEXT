@@ -11,6 +11,7 @@ from .radial_mae_voxelnext import RadialMAEVoxelNeXt
 from .rmae_cmae_backbone_fixed import RMAECMAEBackbone
 from .radial_mae_voxelnext_optimized import RadialMAEVoxelNeXtOptimized
 from .radial_mae_voxelnext_clean import RadialMAEVoxelNeXtClean
+from .rmae_cmae_backbone_phase1 import RMAECMAEBackbonePhase1
 
 
 __all__ = {
@@ -29,5 +30,6 @@ __all__ = {
     'RadialMAEVoxelNeXt': RadialMAEVoxelNeXt,
     'RMAECMAEBackbone': RMAECMAEBackbone,
     'RadialMAEVoxelNeXtOptimized': RadialMAEVoxelNeXtOptimized,
-    'RadialMAEVoxelNeXtClean': RadialMAEVoxelNeXtClean
+    'RadialMAEVoxelNeXtClean': RadialMAEVoxelNeXtClean,
+    'RMAECMAEBackbonePhase1': RMAECMAEBackbonePhase1  
 }

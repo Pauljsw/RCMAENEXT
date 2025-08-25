@@ -1,0 +1,172 @@
+# cfgs/custom_models/rmae_cmae_isarc_4class_finetune_phase1.yaml
+
+
+# ✅ 기존과 동일한 클래스명 사용
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    # ✅ 기존과 동일한 base config 사용
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    # ✅ 기존 fine-tuning과 동일한 augmentation (gt_sampling 포함)
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['placeholder']
+        AUG_CONFIG_LIST:
+            - NAME: gt_sampling
+              USE_ROAD_PLANE: False
+              DB_INFO_PATH:
+                  - custom_dbinfos_train.pkl
+              BACKUP_DB_INFO:
+                  DB_INFO_PATH: custom_dbinfos_train.pkl
+                  DB_DATA_PATH: gt_database/custom_database.npy
+                  NUM_POINT_FEATURES: 3
+              PREPARE: {
+                 filter_by_min_points: ['dumptruck:15', 'excavator:15', 'grader:15', 'roller:15'],
+              }
+              SAMPLE_GROUPS: ['dumptruck:15', 'excavator:15', 'grader:15', 'roller:15']
+              NUM_POINT_FEATURES: 3
+              DATABASE_WITH_FAKELIDAR: False
+              REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
+              LIMIT_WHOLE_SCENE: False
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+            - NAME: random_world_rotation
+              WORLD_ROT_ANGLE: [-0.78539816, 0.78539816]
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.95, 1.05]
+
+MODEL:
+    NAME: RMAECMAEDetectorPhase1  # 🔥 Phase 1 detector
+
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: RMAECMAEBackbonePhase1  # 🔥 Phase 1 backbone
+        
+        # ===== R-MAE 설정 (fine-tuning에서는 masking 비활성화) =====
+        MASKED_RATIO: 0.0               # Fine-tuning에서는 masking 비활성화
+        
+        # ===== 🔥 Phase 1: Teacher-Student 설정 =====
+        ENABLE_TEACHER_STUDENT: False   # Fine-tuning에서는 Teacher-Student 비활성화
+        PRETRAINING: False              # Pretraining 모드 비활성화
+        
+    # 🔥 기존 fine-tuning과 동일한 Detection Head 구조
+    DENSE_HEAD:
+        NAME: VoxelNeXtHead
+        CLASS_AGNOSTIC: False
+        INPUT_FEATURES: 128
+        
+        CLASS_NAMES_EACH_HEAD: [
+            ['dumptruck', 'excavator', 'grader', 'roller'],
+        ]
+        
+        SHARED_CONV_CHANNEL: 128
+        KERNEL_SIZE_HEAD: 1
+        
+        USE_BIAS_BEFORE_NORM: True
+        NUM_HM_CONV: 2
+        SEPARATE_HEAD_CFG:
+            HEAD_ORDER: ['center', 'center_z', 'dim', 'rot']
+            HEAD_DICT: {
+                'center': {'out_channels': 2, 'num_conv': 2},
+                'center_z': {'out_channels': 1, 'num_conv': 2},
+                'dim': {'out_channels': 3, 'num_conv': 2},
+                'rot': {'out_channels': 2, 'num_conv': 2},
+            }
+
+        TARGET_ASSIGNER_CONFIG:
+            FEATURE_MAP_STRIDE: 8
+            NUM_MAX_OBJS: 500
+            GAUSSIAN_OVERLAP: 0.1
+            MIN_RADIUS: 2
+
+        LOSS_CONFIG:
+            LOSS_WEIGHTS:
+                cls_weight: 1.0
+                loc_weight: 2.0
+                code_weights: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+        POST_PROCESSING:
+            SCORE_THRESH: 0.1
+            POST_CENTER_LIMIT_RANGE: [-51.2, -51.2, -5.0, 51.2, 51.2, 3.0]
+            MAX_OBJ_PER_SAMPLE: 500
+            USE_IOU_TO_RECTIFY_SCORE: True
+            IOU_RECTIFIER: [0.68, 0.71, 0.65]
+
+            
+            NMS_CONFIG:
+                MULTI_CLASSES_NMS: False
+                NMS_TYPE: nms_gpu
+                NMS_THRESH: [0.2, 0.25, 0.25, 0.25]
+                NMS_PRE_MAXSIZE: [4096, 4096, 4096, 4096]
+                NMS_POST_MAXSIZE: [500, 500, 500, 500]
+
+    POST_PROCESSING:
+        RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+        OUTPUT_RAW_SCORE: False
+        EVAL_METRIC: kitti
+
+# ===== 🚀 Loss 가중치 설정 =====
+LOSS_CONFIG:
+    RMAE_WEIGHT: 0.0                    # Fine-tuning에서는 R-MAE loss 비활성화  
+    TEACHER_STUDENT_WEIGHT: 0.0         # Phase 1에서는 비활성화
+    DETECTION_WEIGHT: 1.0               # Detection loss만 활성화
+
+OPTIMIZATION:
+    # ===== 📊 차등 학습률 적용 =====
+    BATCH_SIZE_PER_GPU: 4               # 기존과 동일
+    NUM_EPOCHS: 50                      # Fine-tuning 에포크
+
+    OPTIMIZER: adam_onecycle            # 기존과 동일
+    LR: 0.003                           # Fine-tuning LR
+    WEIGHT_DECAY: 0.01                  # 기존과 동일
+    MOMENTUM: 0.9                       # 기존과 동일
+
+    # 📍 차등 학습률 설정
+    DIFFERENTIAL_LR: True               # 차등 학습률 활성화
+    BACKBONE_LR_RATIO: 0.1              # Backbone: 10% LR (pretrained이므로 낮게)  
+    DENSE_HEAD_LR_RATIO: 2.0            # Dense Head: 200% LR (새로 학습이므로 높게)
+
+    MOMS: [0.95, 0.85]                  # 기존과 동일
+    PCT_START: 0.4                      # 기존과 동일
+    DIV_FACTOR: 10                      # 기존과 동일
+    DECAY_STEP_LIST: [35, 45]           # 50 epochs에 맞게 조정
+    LR_DECAY: 0.1                       # 기존과 동일
+    LR_CLIP: 0.0000001                  # 기존과 동일
+
+    # Warmup 설정
+    LR_WARMUP: False                    # 기존과 동일  
+    WARMUP_EPOCH: 1                     # Fine-tuning은 짧은 warmup
+    
+    GRAD_NORM_CLIP: 10                  # 기존과 동일
+
+# ===== 📝 Phase 1 실험 태그 =====  
+EXPERIMENT:
+    PHASE: 1
+    DESCRIPTION: 'Teacher-Student pretrained backbone fine-tuning with exact compatibility'
+    FEATURES: ['differential_lr', 'teacher_student_pretrained', 'detection_optimization', 'rmae_compatibility']
+    EXPECTED_IMPROVEMENT: 'Baseline detection performance with Teacher-Student infrastructure'
+    DIFFERENTIAL_LR: True               # 차등 학습률 활성화
+    BACKBONE_LR_RATIO: 0.1              # Backbone: 10% LR (pretrained이므로 낮게)
+    DENSE_HEAD_LR_RATIO: 2.0            # Dense Head: 200% LR (새로 학습이므로 높게)
+
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [35, 45]           # 50 epochs에 맞게 조정
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+
+    # Warmup 설정
+    LR_WARMUP: True
+    WARMUP_EPOCH: 1                     # Fine-tuning은 짧은 warmup
+    
+    GRAD_NORM_CLIP: 10
+
+# ===== 📝 Phase 1 실험 태그 =====  
+EXPERIMENT:
+    PHASE: 1
+    DESCRIPTION: 'Teacher-Student pretrained backbone fine-tuning'
+    FEATURES: ['differential_lr', 'teacher_student_pretrained', 'detection_optimization']
+    EXPECTED_IMPROVEMENT: 'Baseline detection performance with Teacher-Student infrastructure'

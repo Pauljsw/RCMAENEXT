@@ -40,7 +40,7 @@ MODEL:
 
 # 📍 공식 R-MAE 스타일의 최적화 설정
 OPTIMIZATION:
-    BATCH_SIZE_PER_GPU: 4     # 공식과 동일
+    BATCH_SIZE_PER_GPU: 8     # 공식과 동일
     NUM_EPOCHS: 30            # 공식과 동일
 
     OPTIMIZER: adam_onecycle  # 공식과 동일

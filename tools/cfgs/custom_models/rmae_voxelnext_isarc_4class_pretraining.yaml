@@ -1,3 +1,56 @@
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: ['gt_sampling']
+        AUG_CONFIG_LIST:
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.98, 1.02]
+
+MODEL:
+    NAME: RMAEVoxelNeXt
+    
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: RadialMAEVoxelNeXt  # ✅ 올바르게 등록된 이름 사용
+        MASKED_RATIO: 0.8
+        ANGULAR_RANGE: 1
+        PRETRAINING: True
+
+    # DENSE_HEAD 섹션 완전 제거 (pretraining에서는 불필요)
+
+    POST_PROCESSING:
+        RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+        EVAL_METRIC: kitti
+
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 8
+    NUM_EPOCHS: 30
+
+    OPTIMIZER: adam_onecycle
+    LR: 0.001                 # ✅ Pretraining용 낮은 학습률
+    WEIGHT_DECAY: 0.01
+    MOMENTUM: 0.9
+
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [20, 25]  # ✅ 30 epoch에 맞게 조정
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+
+    LR_WARMUP: False
+    WARMUP_EPOCH: 1
+
+    GRAD_NORM_CLIP: 10
+
+
 # CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
 
 # DATA_CONFIG:
@@ -14,14 +67,50 @@
 # MODEL:
 #     NAME: RMAEVoxelNeXt
     
+#     # ===== 📄 R-MAE 논문 Enhanced Loss 파라미터 =====
+#     OCCUPANCY_WEIGHT: 1.0
+#     CONSISTENCY_WEIGHT: 0.3
+    
+#     # Distance-aware loss weighting (논문 기반)
+#     USE_DISTANCE_WEIGHTING: True
+#     DISTANCE_LOSS_WEIGHTS:
+#         NEAR: 1.5   # ≤10m: 높은 가중치 (중요한 세부사항)
+#         MID: 1.0    # 10~30m: 표준 가중치
+#         FAR: 0.7    # >30m: 낮은 가중치 (먼 거리 객체)
+    
+#     # Focal loss for class imbalance (선택사항)
+#     USE_FOCAL_LOSS: False
+#     FOCAL_ALPHA: 0.25
+#     FOCAL_GAMMA: 2.0
+    
+#     # Hard negative mining (선택사항)  
+#     USE_HARD_NEGATIVE_MINING: False
+    
 #     VFE:
 #         NAME: MeanVFE
 
 #     BACKBONE_3D:
-#         NAME: RadialMAEVoxelNeXt  # ✅ 올바르게 등록된 이름 사용
-#         MASKED_RATIO: 0.8
-#         ANGULAR_RANGE: 1
+#         NAME: RadialMAEVoxelNeXt
 #         PRETRAINING: True
+        
+#         # ===== 📄 R-MAE 논문 정확한 파라미터 =====
+#         # 기본 masking
+#         MASKED_RATIO: 0.8
+        
+#         # Stage 1: Angular Group Selection
+#         NUM_ANGULAR_GROUPS: 36          # Ng = 36 groups
+#         ANGULAR_GROUP_SIZE: 10          # Δθ = 10 degrees (360/36)
+        
+#         # 🔧 Stage 2: 10m/30m 기준 Range-Aware Masking 
+#         DISTANCE_THRESHOLDS: [10, 30]   # 변경: Near≤10m, Mid 10~30m, Far>30m
+#         RANGE_MASK_PROBS:               # 변경: 10m/30m 기준 마스킹 확률
+#             NEAR: 0.50      # Near≤10m: 50% 마스킹 (세부사항 보존)
+#             MID: 0.75       # Mid 10~30m: 75% 마스킹 (표준)
+#             FAR: 0.90       # Far>30m: 90% 마스킹 (높은 마스킹)
+        
+#         # 논문 구현 옵션
+#         USE_BERNOULLI_MASKING: True     # Bernoulli distribution 사용
+#         ENABLE_2STAGE_MASKING: True     # 2-Stage masking 활성화
 
 #     # DENSE_HEAD 섹션 완전 제거 (pretraining에서는 불필요)
 
@@ -49,92 +138,3 @@
 #     WARMUP_EPOCH: 1
 
 #     GRAD_NORM_CLIP: 10
-
-
-CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
-
-DATA_CONFIG:
-    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
-    
-    DATA_AUGMENTOR:
-        DISABLE_AUG_LIST: ['gt_sampling']
-        AUG_CONFIG_LIST:
-            - NAME: random_world_flip
-              ALONG_AXIS_LIST: ['x']
-            - NAME: random_world_scaling
-              WORLD_SCALE_RANGE: [0.98, 1.02]
-
-MODEL:
-    NAME: RMAEVoxelNeXt
-    
-    # ===== 📄 R-MAE 논문 Enhanced Loss 파라미터 =====
-    OCCUPANCY_WEIGHT: 1.0
-    CONSISTENCY_WEIGHT: 0.3
-    
-    # Distance-aware loss weighting (논문 기반)
-    USE_DISTANCE_WEIGHTING: True
-    DISTANCE_LOSS_WEIGHTS:
-        NEAR: 1.5   # ≤10m: 높은 가중치 (중요한 세부사항)
-        MID: 1.0    # 10~30m: 표준 가중치
-        FAR: 0.7    # >30m: 낮은 가중치 (먼 거리 객체)
-    
-    # Focal loss for class imbalance (선택사항)
-    USE_FOCAL_LOSS: False
-    FOCAL_ALPHA: 0.25
-    FOCAL_GAMMA: 2.0
-    
-    # Hard negative mining (선택사항)  
-    USE_HARD_NEGATIVE_MINING: False
-    
-    VFE:
-        NAME: MeanVFE
-
-    BACKBONE_3D:
-        NAME: RadialMAEVoxelNeXt
-        PRETRAINING: True
-        
-        # ===== 📄 R-MAE 논문 정확한 파라미터 =====
-        # 기본 masking
-        MASKED_RATIO: 0.8
-        
-        # Stage 1: Angular Group Selection
-        NUM_ANGULAR_GROUPS: 36          # Ng = 36 groups
-        ANGULAR_GROUP_SIZE: 10          # Δθ = 10 degrees (360/36)
-        
-        # 🔧 Stage 2: 10m/30m 기준 Range-Aware Masking 
-        DISTANCE_THRESHOLDS: [10, 30]   # 변경: Near≤10m, Mid 10~30m, Far>30m
-        RANGE_MASK_PROBS:               # 변경: 10m/30m 기준 마스킹 확률
-            NEAR: 0.50      # Near≤10m: 50% 마스킹 (세부사항 보존)
-            MID: 0.75       # Mid 10~30m: 75% 마스킹 (표준)
-            FAR: 0.90       # Far>30m: 90% 마스킹 (높은 마스킹)
-        
-        # 논문 구현 옵션
-        USE_BERNOULLI_MASKING: True     # Bernoulli distribution 사용
-        ENABLE_2STAGE_MASKING: True     # 2-Stage masking 활성화
-
-    # DENSE_HEAD 섹션 완전 제거 (pretraining에서는 불필요)
-
-    POST_PROCESSING:
-        RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
-        EVAL_METRIC: kitti
-
-OPTIMIZATION:
-    BATCH_SIZE_PER_GPU: 16
-    NUM_EPOCHS: 30
-
-    OPTIMIZER: adam_onecycle
-    LR: 0.001                 # ✅ Pretraining용 낮은 학습률
-    WEIGHT_DECAY: 0.01
-    MOMENTUM: 0.9
-
-    MOMS: [0.95, 0.85]
-    PCT_START: 0.4
-    DIV_FACTOR: 10
-    DECAY_STEP_LIST: [20, 25]  # ✅ 30 epoch에 맞게 조정
-    LR_DECAY: 0.1
-    LR_CLIP: 0.0000001
-
-    LR_WARMUP: False
-    WARMUP_EPOCH: 1
-
-    GRAD_NORM_CLIP: 10
