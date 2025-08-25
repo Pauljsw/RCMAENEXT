@@ -1,0 +1,171 @@
+# 🔥 Phase 2: Multi-scale Feature Reconstruction + Contrastive Learning
+
+## 🎯 Phase 2 목표
+**"CMAE-3D의 핵심 기능 구현으로 성능 향상"**
+
+---
+
+## 📊 Phase 1 vs Phase 2 차이점
+
+### **Phase 1 (현재 진행 중):**
+- ✅ Teacher-Student 구조 **기반 마련**
+- ✅ Teacher features 추출 (사용하지 않음)
+- ✅ 기존 R-MAE loss만 사용 (`TEACHER_STUDENT_WEIGHT: 0.0`)
+- ✅ **성능**: 기존 R-MAE와 동일 (infrastructure 구축이 목적)
+
+### **Phase 2 (다음 단계):**
+- 🔥 Teacher features를 **실제로 활용**
+- 🔥 **Multi-scale Feature Reconstruction** 추가
+- 🔥 **Contrastive Learning** 추가  
+- 🔥 **성능**: +2~5 mAP 향상 예상
+
+---
+
+## 🛠 Phase 2에서 구현할 기능들
+
+### **1. Multi-scale Latent Feature Reconstruction (MLFR)**
+
+**현재 Phase 1:**
+```python
+# 단순한 occupancy prediction
+loss = BCE_loss(occupancy_pred, occupancy_target)
+```
+
+**Phase 2에서 추가:**
+```python
+# Multi-scale semantic feature reconstruction
+teacher_features = {
+    'scale_1': teacher_conv1_features,  # 16 channels
+    'scale_2': teacher_conv2_features,  # 32 channels  
+    'scale_3': teacher_conv3_features,  # 64 channels
+    'scale_4': teacher_conv4_features   # 128 channels
+}
+
+student_features = {
+    'scale_1': student_conv1_features,
+    # ... 동일한 구조
+}
+
+# Multi-scale reconstruction loss
+mlfr_loss = 0
+for scale in ['scale_1', 'scale_2', 'scale_3', 'scale_4']:
+    pred_features = student_decoder[scale](student_features[scale])
+    target_features = teacher_features[scale].detach()
+    mlfr_loss += MSE_loss(pred_features, target_features)
+```
+
+**효과**: 고차원 semantic 정보 학습으로 representation quality 향상
+
+---
+
+### **2. Voxel-level Contrastive Learning**
+
+**Phase 2에서 추가:**
+```python
+def voxel_contrastive_loss(teacher_embed, student_embed, voxel_coords):
+    # 같은 공간 위치의 voxel = positive pair
+    # 다른 공간 위치의 voxel = negative pair
+    
+    positive_pairs = find_same_position_voxels(voxel_coords)
+    
+    # InfoNCE loss
+    similarity_matrix = cosine_similarity(student_embed, teacher_embed)
+    contrastive_loss = info_nce_loss(similarity_matrix, positive_pairs)
+    
+    return contrastive_loss
+```
+
+**효과**: 공간적 일관성 학습으로 robust representation 구축
+
+---
+
+### **3. Hierarchical Relational Contrastive Learning**
+
+**Phase 2에서 추가:**
+```python
+# Frame-level contrastive learning (시간적 일관성)
+def frame_contrastive_loss(current_features, previous_features):
+    # 인접 프레임 간 semantic similarity 강화
+    # False negative 문제 완화
+    pass
+
+# 건설장비 도메인 특화 contrastive
+def domain_specific_contrastive(features, equipment_types):
+    # 같은 장비 타입 = positive
+    # 다른 장비 타입 = negative  
+    pass
+```
+
+---
+
+### **4. 통합 Loss Function**
+
+**Phase 1 (현재):**
+```python
+total_loss = rmae_loss  # occupancy만
+```
+
+**Phase 2:**
+```python
+total_loss = (
+    λ₁ * rmae_loss +                    # 기존 occupancy (1.0)
+    λ₂ * mlfr_loss +                    # Multi-scale reconstruction (1.0) 
+    λ₃ * voxel_contrastive_loss +       # Voxel contrastive (0.6)
+    λ₄ * frame_contrastive_loss         # Frame contrastive (0.3)
+)
+```
+
+**CMAE-3D 논문**: `λ₃ = 0.6`이 최적값
+
+---
+
+## 📈 예상 성능 개선
+
+### **Phase 1 (현재):**
+- **목표**: 기존 R-MAE 성능 유지 + infrastructure 구축
+- **mAP 변화**: ±0 (동일 성능)
+
+### **Phase 2:**
+- **목표**: CMAE-3D 핵심 기능으로 성능 향상
+- **mAP 개선**: +2~5 mAP (CMAE-3D 논문 기준)
+
+**근거**:
+- **Waymo**: CMAE-3D가 기존 MAE 대비 +1.5 mAP
+- **nuScenes**: CMAE-3D가 기존 MAE 대비 +2.3 mAP
+- **건설장비**: Domain-specific optimization으로 더 큰 향상 예상
+
+---
+
+## ⏰ Phase 2 구현 일정
+
+### **Step 1: Multi-scale Feature Reconstruction (1주)**
+- Student decoder 확장
+- Multi-scale loss 구현
+- 성능 검증
+
+### **Step 2: Voxel-level Contrastive Learning (1주)**  
+- InfoNCE loss 구현
+- Positive/negative pair 생성
+- Hyperparameter tuning
+
+### **Step 3: Frame-level + Domain-specific Contrastive (1주)**
+- Memory bank 구현
+- 건설장비 특화 logic
+- 통합 테스트
+
+### **Step 4: Loss Balancing + Optimization (1주)**
+- Loss weight 조정 (λ 값들)
+- Learning rate scheduling
+- 최종 성능 평가
+
+---
+
+## 🎯 Phase 1 완료 후 바로 Phase 2 진행
+
+**현재 Pretraining이 성공적으로 진행 중**이라면:
+
+1. ✅ **Phase 1 완료 확인**: Pretraining loss가 수렴하고 오류 없음
+2. 🔥 **Phase 2 즉시 시작**: Multi-scale Feature Reconstruction 구현
+3. 📊 **성능 비교**: Phase 1 (기존 성능) vs Phase 2 (향상된 성능)
+
+**Fine-tuning은 Phase 2 완료 후에 진행**해서 최종 detection 성능을 확인하겠습니다!

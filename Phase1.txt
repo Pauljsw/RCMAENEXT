@@ -1,0 +1,156 @@
+# 🔥 Phase 1: Teacher-Student Architecture 실행 가이드
+
+## 📁 새로 생성된 파일들
+
+### 1. **Core Implementation Files**
+```
+pcdet/models/backbones_3d/rmae_cmae_backbone_phase1.py     # Teacher-Student Backbone
+pcdet/models/detectors/rmae_cmae_detector_phase1.py        # Teacher-Student Detector  
+tools/train_rmae_cmae_phase1.py                            # Phase 1 Training Script
+tools/train_utils/optimization/differential_lr.py          # 차등 학습률 구현
+```
+
+### 2. **Configuration Files**
+```
+cfgs/custom_models/rmae_cmae_isarc_4class_pretraining_phase1.yaml    # Pretraining 설정
+cfgs/custom_models/rmae_cmae_isarc_4class_finetune_phase1.yaml       # Fine-tuning 설정
+```
+
+### 3. **Updated Registry Files**
+```
+pcdet/models/backbones_3d/__init__.py    # RMAECMAEBackbonePhase1 등록
+pcdet/models/detectors/__init__.py       # RMAECMAEDetectorPhase1 등록
+```
+
+---
+
+## 🚀 실행 명령어
+
+### **Stage 1: Pretraining (Self-supervised Learning)**
+```bash
+python tools/train_rmae_cmae_phase1.py \
+    --cfg_file cfgs/custom_models/rmae_cmae_isarc_4class_pretraining_phase1.yaml \
+    --batch_size 8 \
+    --epochs 30 \
+    --extra_tag rmae_cmae_pretraining_phase1
+```
+
+### **Stage 2: Fine-tuning (Supervised Detection)**  
+```bash
+bash scripts/dist_train.sh 1 \
+    --cfg_file cfgs/custom_models/rmae_cmae_isarc_4class_finetune_phase1.yaml \
+    --pretrained_model /home/sungwoo/VoxelNeXt/output/custom_models/rmae_cmae_isarc_4class_pretraining_phase1/rmae_cmae_pretraining_phase1/ckpt/checkpoint_epoch_30.pth \
+    --batch_size 8 \
+    --extra_tag rmae_cmae_finetune_phase1
+```
+
+---
+
+## 📊 코드 실행 흐름
+
+### **Pretraining 실행 흐름:**
+```
+train_rmae_cmae_phase1.py
+    ↓
+parse_config() → 설정 파일 로드
+    ↓
+build_dataloader() → 데이터셋 구축  
+    ↓
+build_network() → RMAECMAEDetectorPhase1 생성
+    ↓ 
+RMAECMAEDetectorPhase1.__init__()
+    ↓
+build_networks() → RMAECMAEBackbonePhase1 생성
+    ↓
+train_model_phase1() → 훈련 루프 시작
+    ↓
+train_one_epoch_phase1()
+    ↓
+model_func(model, batch_dict)
+    ↓
+RMAECMAEDetectorPhase1.forward()
+    ↓
+RMAECMAEBackbonePhase1.forward()
+    ↓
+teacher_forward() + student_forward() (if training & teacher_student enabled)
+    ↓ 
+get_training_loss()
+    ↓
+_get_rmae_loss() (현재 활성화) + _get_teacher_student_loss() (Phase 1에서는 비활성화)
+```
+
+### **Fine-tuning 실행 흐름:**  
+```
+scripts/dist_train.sh → tools/train.py
+    ↓
+build_network() → RMAECMAEDetectorPhase1 (ENABLE_TEACHER_STUDENT=False)
+    ↓
+load_params_from_file() → Pretrained weights 로드
+    ↓
+create_optimizer_with_differential_lr() → 차등 학습률 적용
+    ↓
+train_one_epoch()
+    ↓
+RMAECMAEDetectorPhase1.forward() (detection 모드)
+    ↓
+_get_detection_loss() → Classification + Regression loss
+```
+
+---
+
+## 🔧 핵심 기능
+
+### **Phase 1에서 구현된 기능:**
+
+1. **✅ Teacher-Student Architecture**
+   - Teacher Branch: Complete voxel view 처리
+   - Student Branch: Masked voxel view 처리 (기존 R-MAE 로직 활용)
+   - 기존 R-MAE 호환성 완전 유지
+
+2. **✅ 차등 학습률**
+   - Backbone: 10% LR (pretrained weights 보존)
+   - Dense Head: 200% LR (새로운 task adaptation)
+   - Fine-tuning 성능 최적화
+
+3. **✅ 설정 호환성**
+   - 기존 R-MAE 설정 파일과 완전 호환
+   - Teacher-Student 기능 ON/OFF 가능
+   - 점진적 확장을 위한 구조 준비
+
+### **Phase 1에서 비활성화된 기능 (Phase 2에서 구현 예정):**
+
+1. **🔄 Contrastive Learning**  
+   - `TEACHER_STUDENT_WEIGHT: 0.0` (비활성화)
+   - `_get_teacher_student_loss()` placeholder만 구현
+
+2. **🔄 Multi-scale Feature Reconstruction**
+   - Teacher features 추출까지만 구현
+   - MLFR loss는 Phase 2에서 추가 예정
+
+---
+
+## 📈 예상 결과
+
+### **Phase 1 목표:**
+- ✅ 기존 R-MAE 성능 완전 유지
+- ✅ Teacher-Student 구조 기반 마련
+- ✅ 차등 학습률로 fine-tuning 성능 개선 (+0.5~1.0 mAP)
+- ✅ Phase 2 확장을 위한 안정적인 infrastructure
+
+### **실험 검증 포인트:**
+1. **호환성 검증**: 기존 R-MAE와 동일한 pretraining 성능
+2. **차등 학습률 효과**: Fine-tuning 성능 개선 확인
+3. **Teacher-Student 준비**: Phase 2 확장 가능성 확인
+
+---
+
+## 🎯 Phase 2 준비사항
+
+Phase 1이 성공적으로 실행되면 다음 단계로 넘어갑니다:
+
+1. **Multi-scale Latent Feature Reconstruction (MLFR)** 구현
+2. **Voxel-level Contrastive Learning** 추가
+3. **Loss balancing** 최적화
+4. **성능 평가** 및 hyperparameter tuning
+
+Phase 1 실행 후 결과를 확인해주시면 Phase 2로 진행하겠습니다!
