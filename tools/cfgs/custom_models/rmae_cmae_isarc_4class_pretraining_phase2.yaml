@@ -1,160 +1,130 @@
 # cfgs/custom_models/rmae_cmae_isarc_4class_pretraining_phase2.yaml
-# """
-# CMAE-3D Phase 2: Multi-scale Latent Feature Reconstruction Pretraining Configuration
+# CMAE-3D Phase 2: Multi-scale Latent Feature Reconstruction + Voxel-level + Frame-level Contrastive Learning
+# 완전한 CMAE-3D 논문 구현 - 실행 준비 완료
 
-# Phase 2 목표:
-# - Phase 1 Teacher-Student 기능 유지 ✅
-# - Multi-scale Latent Feature Reconstruction 추가 🔥
-# - 성능 향상을 위한 semantic feature learning 🔥
-# """
-
-# ✅ 기존과 동일한 클래스명 사용 (Phase 1과 호환)
 CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
 
 DATA_CONFIG:
-    # ✅ 기존과 동일한 base config 사용
     _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
     
-    # ✅ Phase 1과 동일한 augmentation (gt_sampling 비활성화)
+    # Pretraining용 augmentation (gt_sampling 비활성화)
     DATA_AUGMENTOR:
-        DISABLE_AUG_LIST: ['gt_sampling']  # pretraining에서는 gt_sampling 비활성화
+        DISABLE_AUG_LIST: ['gt_sampling']
         AUG_CONFIG_LIST:
             - NAME: random_world_flip
               ALONG_AXIS_LIST: ['x']
             - NAME: random_world_scaling
-              WORLD_SCALE_RANGE: [0.98, 1.02]  # 기존과 동일
+              WORLD_SCALE_RANGE: [0.98, 1.02]
 
 MODEL:
-    NAME: RMAECMAEDetectorPhase2  # 🔥 새로운 Phase 2 detector
+    NAME: RMAECMAEDetectorPhase2
 
     VFE:
         NAME: MeanVFE
 
     BACKBONE_3D:
-        NAME: RMAECMAEBackbonePhase2  # 🔥 새로운 Phase 2 backbone
+        NAME: RMAECMAEBackbonePhase2
         
-        # ===== 📄 Phase 1 설정 완전 유지 =====
+        # ===== R-MAE 기본 설정 =====
         MASKED_RATIO: 0.8
+        NUM_ANGULAR_GROUPS: 36
+        ANGULAR_GROUP_SIZE: 10
+        DISTANCE_THRESHOLDS: [10, 30]
+        RANGE_MASK_PROBS:
+            NEAR: 0.50
+            MID: 0.75
+            FAR: 0.90
+        USE_BERNOULLI_MASKING: True
+        ENABLE_2STAGE_MASKING: True
         
-        # Stage 1: Angular Group Selection
-        NUM_ANGULAR_GROUPS: 36          # Ng = 36 groups
-        ANGULAR_GROUP_SIZE: 10          # Δθ = 10 degrees (360/36)
+        # ===== Phase 2 Teacher-Student 설정 =====
+        ENABLE_TEACHER_STUDENT: True
+        TEACHER_STUDENT_MODE: 'phase2'
+        TEACHER_BACKBONE_TYPE: 'identical'
+        FEATURE_DIM: 128
         
-        # Stage 2: 10m/30m 기준 Range-Aware Masking 
-        DISTANCE_THRESHOLDS: [10, 30]   # Near≤10m, Mid 10~30m, Far>30m
-        RANGE_MASK_PROBS:               # 10m/30m 기준 마스킹 확률
-            NEAR: 0.50      # Near≤10m: 50% 마스킹 (세부사항 보존)
-            MID: 0.75       # Mid 10~30m: 75% 마스킹 (표준)
-            FAR: 0.90       # Far>30m: 90% 마스킹 (높은 마스킹)
-        
-        # 논문 구현 옵션 (Phase 1과 동일)
-        USE_BERNOULLI_MASKING: True     # Bernoulli distribution 사용
-        ENABLE_2STAGE_MASKING: True     # 2-Stage masking 활성화
-        
-        # ===== 🔥 Phase 1: Teacher-Student 설정 유지 =====
-        ENABLE_TEACHER_STUDENT: True      # Teacher-Student architecture 활성화
-        TEACHER_STUDENT_MODE: 'phase2'    # Phase 2 모드로 변경
-        TEACHER_BACKBONE_TYPE: 'identical'  # Teacher = Student backbone
-        FEATURE_DIM: 128                    # Feature projection 차원
-        
-        # ===== 🔥🔥 Phase 2: Multi-scale Latent Feature Reconstruction 설정 =====
-        ENABLE_MLFR: True                   # MLFR 기능 활성화
-        MLFR_WEIGHT: 1.0                    # MLFR loss 가중치 (R-MAE와 동등)
-        
-        # MLFR 상세 설정
+        # ===== Phase 2 Step 1: Multi-scale Latent Feature Reconstruction =====
+        ENABLE_MLFR: True
+        MLFR_WEIGHT: 1.0
         MLFR_CONFIG:
             ENABLE_MLFR: True
-            MLFR_SCALES: ['scale_1', 'scale_2', 'scale_3', 'scale_4']  # 모든 scale 사용
-            
-            # Scale별 loss 가중치 (CMAE-3D 논문 기반)
+            MLFR_SCALES: ['scale_1', 'scale_2', 'scale_3', 'scale_4']
             MLFR_LOSS_WEIGHTS:
-                scale_1: 0.5    # Early features (16 channels): 낮은 가중치
-                scale_2: 0.8    # Mid features (32 channels): 중간 가중치  
-                scale_3: 1.0    # Late features (64 channels): 높은 가중치
-                scale_4: 1.2    # Final features (128 channels): 최고 가중치
+                scale_1: 0.5
+                scale_2: 0.8
+                scale_3: 1.0
+                scale_4: 1.2
         
-        # ===== 🔥🔥 Phase 2: Voxel-level Contrastive Learning 설정 =====
-        ENABLE_VOXEL_CONTRASTIVE: True      # Voxel contrastive learning 활성화
-        VOXEL_CONTRASTIVE_WEIGHT: 0.6       # Contrastive loss 가중치 (CMAE-3D 논문 기본값)
-        
-        # Voxel Contrastive 상세 설정
+        # ===== Phase 2 Step 2: Voxel-level Contrastive Learning =====
+        ENABLE_VOXEL_CONTRASTIVE: True
+        VOXEL_CONTRASTIVE_WEIGHT: 0.6
         VOXEL_CONTRASTIVE_CONFIG:
-            CONTRASTIVE_TEMPERATURE: 0.07    # InfoNCE temperature (CMAE-3D 논문 기본값)
-            FEATURE_DIM: 128                 # Input feature dimension
-            PROJECTION_DIM: 128              # Contrastive projection dimension
-            
-            # Negative sampling 설정
-            MAX_NEGATIVE_SAMPLES: 4096       # 메모리 효율성을 위한 negative sampling
-            
-            # Hard negative mining 설정
+            CONTRASTIVE_TEMPERATURE: 0.07
+            FEATURE_DIM: 128
+            PROJECTION_DIM: 128
+            MAX_NEGATIVE_SAMPLES: 4096
             ENABLE_HARD_NEGATIVE_MINING: True
-            HARD_NEGATIVE_RATIO: 0.3         # 30% hard negatives
-            
-            # Coordinate matching 설정
-            COORD_TOLERANCE: 0               # 정확한 좌표 매칭 (0) vs 근사 매칭 (>0)
+            HARD_NEGATIVE_RATIO: 0.3
+            COORD_TOLERANCE: 0
         
-        # 📍 Pretraining 모드 설정 (Phase 1과 동일)
-        PRETRAINING: True                   # R-MAE occupancy prediction 활성화
+        # ===== Phase 2 Step 3: Frame-level Contrastive Learning =====
+        ENABLE_FRAME_CONTRASTIVE: True
+        FRAME_CONTRASTIVE_WEIGHT: 0.3
+        FRAME_CONTRASTIVE_CONFIG:
+            FRAME_TEMPERATURE: 0.1
+            FEATURE_DIM: 128
+            PROJECTION_DIM: 128
+            MEMORY_BANK_SIZE: 16
+            MOMENTUM_UPDATE: 0.99
+            MAX_FRAME_NEGATIVES: 1024
+            ENABLE_HARD_NEGATIVE_MINING: True
+            HARD_NEGATIVE_RATIO: 0.2
+            ENABLE_DOMAIN_SPECIFIC: True
+            EQUIPMENT_TYPES: ['dumptruck', 'excavator', 'grader', 'roller']
+        
+        # Pretraining 모드
+        PRETRAINING: True
 
-    # ✅ Pretraining 모드에서는 DENSE_HEAD 제거 (Phase 1과 동일)
-
+    # Pretraining에서는 DENSE_HEAD 제거
     POST_PROCESSING:
         RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
         EVAL_METRIC: kitti
 
-# ===== 🚀 Phase 2 Loss 가중치 설정 =====  
+# ===== Phase 2 Loss 가중치 =====
 LOSS_CONFIG:
-    # Phase 1 loss weights 유지
-    RMAE_WEIGHT: 1.0                    # R-MAE occupancy loss 가중치
-    TEACHER_STUDENT_WEIGHT: 0.0         # Phase 2에서도 아직 비활성화 (Phase 3에서 0.6)
-    
-    # 🔥 Phase 2 새로운 loss weights
-    MLFR_WEIGHT: 1.0                    # Multi-scale feature reconstruction loss 가중치
-    VOXEL_CONTRASTIVE_WEIGHT: 0.6       # Voxel-level contrastive learning loss 가중치 (CMAE-3D 논문)
-    DETECTION_WEIGHT: 0.0               # Pretraining에서는 detection 비활성화
+    RMAE_WEIGHT: 1.0
+    MLFR_WEIGHT: 1.0
+    VOXEL_CONTRASTIVE_WEIGHT: 0.6
+    FRAME_CONTRASTIVE_WEIGHT: 0.3
+    TEACHER_STUDENT_WEIGHT: 0.0
+    DETECTION_WEIGHT: 0.0
 
-# ===== 📊 Phase 2 최적화 설정 =====
+# ===== 최적화 설정 =====
 OPTIMIZATION:
-    # Phase 1 최적화 설정 완전 유지 (안정성을 위해)
-    BATCH_SIZE_PER_GPU: 16               # 기존과 동일
-    NUM_EPOCHS: 30                       # 기존과 동일
+    BATCH_SIZE_PER_GPU: 8
+    NUM_EPOCHS: 30
+    OPTIMIZER: adam_onecycle
+    LR: 0.001
+    WEIGHT_DECAY: 0.01
+    MOMENTUM: 0.9
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [20, 25]
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+    LR_WARMUP: False
+    WARMUP_EPOCH: 1
+    GRAD_NORM_CLIP: 10
 
-    OPTIMIZER: adam_onecycle             # 기존과 동일
-    LR: 0.001                            # 기존과 동일 (Pretraining용)
-    WEIGHT_DECAY: 0.01                   # 기존과 동일
-    MOMENTUM: 0.9                        # 기존과 동일
-
-    MOMS: [0.95, 0.85]                   # 기존과 동일
-    PCT_START: 0.4                       # 기존과 동일
-    DIV_FACTOR: 10                       # 기존과 동일
-    DECAY_STEP_LIST: [20, 25]            # 기존과 동일
-    LR_DECAY: 0.1                        # 기존과 동일
-    LR_CLIP: 0.0000001                   # 기존과 동일
-
-    # Warmup 설정 (기존과 동일)
-    LR_WARMUP: False                     # 기존과 동일
-    WARMUP_EPOCH: 1                      # 기존과 동일
-    
-    GRAD_NORM_CLIP: 10                   # 기존과 동일
-
-# ===== 📝 Phase 2 실험 태그 =====
+# ===== 실험 정보 =====
 EXPERIMENT:
     PHASE: 2
-    DESCRIPTION: 'Multi-scale Latent Feature Reconstruction + Voxel-level Contrastive Learning'
-    FEATURES: ['teacher_student_architecture', 'rmae_full_compatibility', 'mlfr_semantic_learning', 'voxel_contrastive_learning']
-    EXPECTED_IMPROVEMENT: '+2~3 mAP improvement through semantic feature learning + spatial consistency'
-    
-    # Phase 2 진행 상황 추적
+    DESCRIPTION: 'Complete CMAE-3D implementation: MLFR + Voxel + Frame Contrastive'
+    FEATURES: ['teacher_student_architecture', 'rmae_full_compatibility', 'mlfr_semantic_learning', 'voxel_contrastive_learning', 'frame_contrastive_learning']
+    EXPECTED_IMPROVEMENT: '+3~5 mAP improvement through complete CMAE-3D implementation'
     PROGRESS:
-        STEP_1_MLFR: 'COMPLETED'            # ✅ Multi-scale Feature Reconstruction
-        STEP_2_VOXEL_CONTRASTIVE: 'COMPLETED'  # ✅ Voxel-level Contrastive Learning
-        STEP_3_FRAME_CONTRASTIVE: 'PENDING'    # Frame-level Contrastive Learning
-        STEP_4_INTEGRATION: 'PENDING'          # Final Integration
-        
-    # Step 2 완료 세부사항
-    STEP_2_DETAILS:
-        CONTRASTIVE_TYPE: 'InfoNCE'
-        TEMPERATURE: 0.07
-        POSITIVE_PAIRS: 'same_spatial_coordinates'
-        NEGATIVE_PAIRS: 'different_spatial_coordinates'
-        HARD_NEGATIVE_MINING: True
+        STEP_1_MLFR: 'COMPLETED'
+        STEP_2_VOXEL_CONTRASTIVE: 'COMPLETED'
+        STEP_3_FRAME_CONTRASTIVE: 'COMPLETED'
+        STEP_4_INTEGRATION: 'READY_FOR_EXECUTION'

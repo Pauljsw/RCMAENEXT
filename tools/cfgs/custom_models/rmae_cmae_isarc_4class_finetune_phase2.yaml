@@ -1,0 +1,184 @@
+# cfgs/custom_models/rmae_cmae_isarc_4class_finetune_phase2.yaml
+# CMAE-3D Phase 2: Fine-tuning Configuration
+# Phase 2 pretrained model을 사용한 detection fine-tuning
+
+CLASS_NAMES: ['dumptruck', 'excavator', 'grader', 'roller']
+
+DATA_CONFIG:
+    _BASE_CONFIG_: cfgs/dataset_configs/custom_dataset_isarc.yaml
+    
+    # Fine-tuning용 전체 augmentation 활성화
+    DATA_AUGMENTOR:
+        DISABLE_AUG_LIST: []
+        AUG_CONFIG_LIST:
+            - NAME: gt_sampling
+              USE_ROAD_PLANE: False
+              DB_INFO_PATH:
+                  - custom_dataset_isarc_dbinfos_train.pkl
+              PREPARE: {
+                 filter_by_min_points: ['dumptruck:5', 'excavator:5', 'grader:5', 'roller:5'],
+                 filter_by_difficulty: [-1],
+              }
+              SAMPLE_GROUPS: ['dumptruck:15', 'excavator:15', 'grader:10', 'roller:10']
+              NUM_POINT_FEATURES: 4
+              DATABASE_WITH_FAKELIDAR: False
+              REMOVE_EXTRA_WIDTH: [0.0, 0.0, 0.0]
+              LIMIT_WHOLE_SCENE: True
+
+            - NAME: random_world_flip
+              ALONG_AXIS_LIST: ['x']
+
+            - NAME: random_world_rotation
+              WORLD_ROTATION_RANGE: [-0.78539816, 0.78539816]
+
+            - NAME: random_world_scaling
+              WORLD_SCALE_RANGE: [0.95, 1.05]
+
+MODEL:
+    NAME: RMAECMAEDetectorPhase2
+
+    VFE:
+        NAME: MeanVFE
+
+    BACKBONE_3D:
+        NAME: RMAECMAEBackbonePhase2
+        
+        # ===== R-MAE 기본 설정 (pretraining과 동일) =====
+        MASKED_RATIO: 0.8
+        NUM_ANGULAR_GROUPS: 36
+        ANGULAR_GROUP_SIZE: 10
+        DISTANCE_THRESHOLDS: [10, 30]
+        RANGE_MASK_PROBS:
+            NEAR: 0.50
+            MID: 0.75
+            FAR: 0.90
+        USE_BERNOULLI_MASKING: True
+        ENABLE_2STAGE_MASKING: True
+        
+        # ===== Phase 2 기능들 Fine-tuning에서 비활성화 =====
+        ENABLE_TEACHER_STUDENT: False
+        ENABLE_MLFR: False
+        ENABLE_VOXEL_CONTRASTIVE: False
+        ENABLE_FRAME_CONTRASTIVE: False
+        
+        # Fine-tuning 모드
+        PRETRAINING: False
+
+    # ===== Detection Head 활성화 =====
+    DENSE_HEAD:
+        NAME: AnchorHeadSingle
+        CLASS_AGNOSTIC: False
+        USE_DIRECTION_CLASSIFIER: True
+        DIR_OFFSET: 0.78539
+        DIR_LIMIT_OFFSET: 0.0
+        NUM_DIR_BINS: 2
+
+        ANCHOR_GENERATOR_CONFIG: [
+            {
+                'class_name': 'dumptruck',
+                'anchor_sizes': [[4.7, 2.1, 1.7]],
+                'anchor_rotations': [0, 1.57],
+                'anchor_bottom_heights': [-0.9],
+                'align_center': False,
+                'feature_map_stride': 8,
+                'matched_threshold': 0.6,
+                'unmatched_threshold': 0.45
+            },
+            {
+                'class_name': 'excavator', 
+                'anchor_sizes': [[6.2, 2.7, 2.9]],
+                'anchor_rotations': [0, 1.57],
+                'anchor_bottom_heights': [-0.9],
+                'align_center': False,
+                'feature_map_stride': 8,
+                'matched_threshold': 0.6,
+                'unmatched_threshold': 0.45
+            },
+            {
+                'class_name': 'grader',
+                'anchor_sizes': [[8.5, 2.5, 3.2]],
+                'anchor_rotations': [0, 1.57], 
+                'anchor_bottom_heights': [-0.9],
+                'align_center': False,
+                'feature_map_stride': 8,
+                'matched_threshold': 0.6,
+                'unmatched_threshold': 0.45
+            },
+            {
+                'class_name': 'roller',
+                'anchor_sizes': [[5.8, 2.3, 2.8]], 
+                'anchor_rotations': [0, 1.57],
+                'anchor_bottom_heights': [-0.9],
+                'align_center': False,
+                'feature_map_stride': 8,
+                'matched_threshold': 0.6,
+                'unmatched_threshold': 0.45
+            }
+        ]
+
+        TARGET_ASSIGNER_CONFIG:
+            NAME: AxisAlignedTargetAssigner
+            POS_FRACTION: -1.0
+            SAMPLE_SIZE: 512
+            NORM_BY_NUM_EXAMPLES: False
+            MATCH_HEIGHT: False
+            BOX_CODER: ResidualCoder
+
+        LOSS_CONFIG:
+            LOSS_WEIGHTS: {
+                'cls_weight': 1.0,
+                'loc_weight': 2.0,  
+                'dir_weight': 0.2,
+                'code_weights': [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            }
+
+    POST_PROCESSING:
+        RECALL_THRESH_LIST: [0.3, 0.5, 0.7]
+        SCORE_THRESH: 0.1
+        OUTPUT_RAW_SCORE: False
+        EVAL_METRIC: kitti
+
+        NMS_CONFIG:
+            MULTI_CLASSES_NMS: False
+            NMS_TYPE: nms_gpu
+            NMS_THRESH: 0.01
+            NMS_PRE_MAXSIZE: 4096
+            NMS_POST_MAXSIZE: 500
+
+# ===== Fine-tuning Loss 가중치 =====
+LOSS_CONFIG:
+    # Pretraining losses 비활성화
+    RMAE_WEIGHT: 0.0
+    MLFR_WEIGHT: 0.0
+    VOXEL_CONTRASTIVE_WEIGHT: 0.0
+    FRAME_CONTRASTIVE_WEIGHT: 0.0
+    TEACHER_STUDENT_WEIGHT: 0.0
+    
+    # Detection loss 활성화
+    DETECTION_WEIGHT: 1.0
+
+# ===== Fine-tuning 최적화 설정 =====
+OPTIMIZATION:
+    BATCH_SIZE_PER_GPU: 16
+    NUM_EPOCHS: 80
+    OPTIMIZER: adam_onecycle
+    LR: 0.01
+    WEIGHT_DECAY: 0.01
+    MOMENTUM: 0.9
+    MOMS: [0.95, 0.85]
+    PCT_START: 0.4
+    DIV_FACTOR: 10
+    DECAY_STEP_LIST: [35, 45]
+    LR_DECAY: 0.1
+    LR_CLIP: 0.0000001
+    LR_WARMUP: False
+    WARMUP_EPOCH: 1
+    GRAD_NORM_CLIP: 10
+
+# ===== 실험 정보 =====
+EXPERIMENT:
+    PHASE: 2
+    STAGE: 'FINE_TUNING'
+    DESCRIPTION: 'Phase 2 pretrained model fine-tuning for detection'
+    PRETRAINED_FEATURES: ['mlfr', 'voxel_contrastive', 'frame_contrastive']
+    EXPECTED_IMPROVEMENT: '+3~5 mAP improvement over baseline R-MAE'
